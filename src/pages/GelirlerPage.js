@@ -48,7 +48,7 @@ const BASLANGIC_GELIRLER = [
 const BOS_FORM = {
   subeId: '', kategori: 'kurs_ucreti', odemeYontemi: 'nakit',
   tarih: new Date().toISOString().split('T')[0],
-  tutar: '', aciklama: '', belgeNo: '', ogrenciAd: '',
+  tutar: '', aciklama: '',
 };
 
 // ─── Yardımcı Bileşenler ───────────────────────────────────
@@ -97,9 +97,7 @@ export default function GelirlerPage() {
     const subeEsles  = subeFiltre  === 'tumu' || g.subeId       === parseInt(subeFiltre);
     const odemeEsles = odemeFiltre === 'tumu' || g.odemeYontemi === odemeFiltre;
     const aramaEsles = aramaMetni  === '' ||
-      (g.aciklama||'').toLowerCase().includes(aramaMetni.toLowerCase()) ||
-      (g.belgeNo ||'').toLowerCase().includes(aramaMetni.toLowerCase()) ||
-      (g.ogrenciAd||'').toLowerCase().includes(aramaMetni.toLowerCase());
+      (g.aciklama||'').toLowerCase().includes(aramaMetni.toLowerCase());
     return katEsles && subeEsles && odemeEsles && aramaEsles;
   }), [gelirler, katFiltre, subeFiltre, odemeFiltre, aramaMetni]);
 
@@ -224,7 +222,7 @@ export default function GelirlerPage() {
         <>
           {/* Filtre Bar */}
           <div className="filtre-bar">
-            <input className="arama-input" placeholder="🔍 Açıklama, öğrenci adı, belge no..."
+            <input className="arama-input" placeholder="🔍 Açıklama, şube, kategori ara..."
               value={aramaMetni} onChange={e => setArama(e.target.value)} />
             <select style={{ padding: '9px 12px', border: '1.5px solid #E2E8F0', borderRadius: '8px', fontSize: '13px', outline: 'none', background: 'white' }}
               value={subeFiltre} onChange={e => setSubeFiltre(e.target.value)}>
@@ -258,17 +256,16 @@ export default function GelirlerPage() {
                   <tr>
                     <th>Tarih</th>
                     <th>Şube</th>
-                    <th>Açıklama / Öğrenci</th>
+                    <th>Açıklama</th>
                     <th>Kategori</th>
                     <th>Ödeme</th>
-                    <th>Belge No</th>
                     <th>Tutar</th>
                     <th>İşlem</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtrelenenler.length === 0 && (
-                    <tr><td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: '#64748B' }}>Kayıt bulunamadı.</td></tr>
+                    <tr><td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: '#64748B' }}>Kayıt bulunamadı.</td></tr>
                   )}
                   {filtrelenenler.map(g => {
                     const sube   = SUBELER.find(s => s.id === g.subeId);
@@ -282,11 +279,9 @@ export default function GelirlerPage() {
                         </td>
                         <td>
                           <div style={{ fontSize: '13px', fontWeight: '500' }}>{g.aciklama}</div>
-                          {g.ogrenciAd && <div style={{ fontSize: '11px', color: '#3B82F6', marginTop: '2px' }}>👤 {g.ogrenciAd}</div>}
                         </td>
                         <td><KategoriRozet kategori={g.kategori} /></td>
                         <td><OdemeYontemiRozetleri yontem={g.odemeYontemi} /></td>
-                        <td style={{ fontSize: '12px', color: '#64748B' }}>{g.belgeNo || '—'}</td>
                         <td>
                           <span style={{ fontWeight: '800', fontSize: '15px', color: '#15803D' }}>
                             ₺{g.tutar.toLocaleString('tr-TR')}
@@ -606,13 +601,7 @@ export default function GelirlerPage() {
             <F label="📅 Tarih *" name="tarih" tip="date" />
           </div>
 
-          {/* Açıklama + Öğrenci */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-            <F label="📝 Açıklama *"    name="aciklama" />
-            <F label="👤 Öğrenci Adı"  name="ogrenciAd" />
-          </div>
-
-          <F label="🧾 Belge / Makbuz No" name="belgeNo" />
+          <F label="📝 Açıklama" name="aciklama" />
 
           {/* Önizleme */}
           {form.tutar && form.subeId && (
@@ -663,9 +652,7 @@ export default function GelirlerPage() {
                   { etiket: 'Şube',       deger: `${sirket?.ikon} ${sube?.ilce}` },
                   { etiket: 'Şirket',     deger: sirket?.ad?.split(' ')[0] },
                   { etiket: 'Tarih',      deger: `📅 ${detayModal.tarih}` },
-                  { etiket: 'Belge No',   deger: detayModal.belgeNo || '—' },
-                  { etiket: 'Açıklama',   deger: detayModal.aciklama },
-                  { etiket: 'Öğrenci',    deger: detayModal.ogrenciAd || '—' },
+                  { etiket: 'Açıklama',   deger: detayModal.aciklama || '—' },
                 ].map(r => (
                   <div key={r.etiket} style={{ background: '#F8FAFC', borderRadius: '8px', padding: '10px 12px', border: '1px solid #E2E8F0' }}>
                     <div style={{ fontSize: '10px', color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '3px' }}>{r.etiket}</div>
