@@ -663,7 +663,7 @@ export default function Ogrenciler() {
       {/* ── Tablo ── */}
       <div className="panel">
         <div className="panel-baslik">
-          <h3>{aktifTab === 'psiko' ? '🧠 Psikoteknik Öğrencileri' : '📋 Öğrenci Listesi'}</h3>
+          <h3>{aktifTab === 'psiko' ? '🧠 Psikoteknik Öğrencileri' : aktifTab === 'src' ? '📋 SRC Öğrencileri' : '📋 Öğrenci Listesi'}</h3>
           <span style={{ fontSize:'13px', color:'#64748B' }}>{filtrelenenler.length} kayıt</span>
         </div>
         <div className="tablo-container">
