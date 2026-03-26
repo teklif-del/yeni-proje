@@ -6,9 +6,7 @@ import Modal from '../components/Modal';
 const GELIR_KATEGORILER = [
   { id: 'kurs_ucreti',   label: 'Kurs Ücreti',        ikon: '📚', renk: '#3B82F6' },
   { id: 'sinav_ucreti',  label: 'Sınav Ücreti',        ikon: '📝', renk: '#8B5CF6' },
-  { id: 'belge_ucreti',  label: 'Belge / Sertifika',   ikon: '📜', renk: '#06B6D4' },
   { id: 'kira_geliri',   label: 'Kira Geliri',          ikon: '🏢', renk: '#10B981' },
-  { id: 'devlet_destegi',label: 'Devlet Desteği',       ikon: '🏛️', renk: '#F59E0B' },
   { id: 'diger',         label: 'Diğer Gelir',          ikon: '💼', renk: '#64748B' },
 ];
 
@@ -30,7 +28,6 @@ const BASLANGIC_GELIRLER = [
   { id: 1,  subeId: 1,  kategori: 'kurs_ucreti',   tarih: '2025-03-05', tutar: 8500,  odemeYontemi: 'nakit', aciklama: 'B sınıfı kurs kayıt ücreti',      belgeNo: 'GLR-2025-0301', ogrenciAd: 'Ahmet Yılmaz' },
   { id: 2,  subeId: 1,  kategori: 'kurs_ucreti',   tarih: '2025-03-10', tutar: 8500,  odemeYontemi: 'kk',    aciklama: 'B sınıfı kurs kayıt ücreti',      belgeNo: 'GLR-2025-0302', ogrenciAd: 'Fatma Demir' },
   { id: 3,  subeId: 1,  kategori: 'sinav_ucreti',  tarih: '2025-03-15', tutar: 1200,  odemeYontemi: 'nakit', aciklama: 'Teorik sınav ücreti',              belgeNo: 'GLR-2025-0303', ogrenciAd: 'Mehmet Kaya' },
-  { id: 4,  subeId: 1,  kategori: 'belge_ucreti',  tarih: '2025-03-18', tutar: 350,   odemeYontemi: 'banka', aciklama: 'Ehliyet belgesi düzenleme ücreti', belgeNo: 'GLR-2025-0304', ogrenciAd: '' },
   { id: 5,  subeId: 2,  kategori: 'kurs_ucreti',   tarih: '2025-03-07', tutar: 9200,  odemeYontemi: 'kk',    aciklama: 'C sınıfı kurs ücreti',             belgeNo: 'GLR-2025-0305', ogrenciAd: 'Ali Çelik' },
   { id: 6,  subeId: 2,  kategori: 'kurs_ucreti',   tarih: '2025-03-12', tutar: 7800,  odemeYontemi: 'nakit', aciklama: 'B sınıfı 2. taksit',               belgeNo: 'GLR-2025-0306', ogrenciAd: 'Zeynep Yıldız' },
   { id: 7,  subeId: 2,  kategori: 'sinav_ucreti',  tarih: '2025-03-20', tutar: 1200,  odemeYontemi: 'nakit', aciklama: 'Direksiyon sınav ücreti',           belgeNo: 'GLR-2025-0307', ogrenciAd: 'Hasan Aydın' },
@@ -44,7 +41,6 @@ const BASLANGIC_GELIRLER = [
   { id: 13, subeId: 13, kategori: 'sinav_ucreti',  tarih: '2025-03-19', tutar: 1200,  odemeYontemi: 'kk',    aciklama: 'Psikoteknik test ücreti',           belgeNo: 'GLR-2025-0313', ogrenciAd: 'Selin Kara' },
   // TMGD
   { id: 14, subeId: 16, kategori: 'kurs_ucreti',   tarih: '2025-03-11', tutar: 6000,  odemeYontemi: 'banka', aciklama: 'TMGD Temel kurs ücreti',            belgeNo: 'GLR-2025-0314', ogrenciAd: 'Serkan Koç' },
-  { id: 15, subeId: 16, kategori: 'belge_ucreti',  tarih: '2025-03-25', tutar: 500,   odemeYontemi: 'nakit', aciklama: 'TMGD sertifika düzenleme ücreti',  belgeNo: 'GLR-2025-0315', ogrenciAd: '' },
   // Kira geliri
   { id: 16, subeId: 1,  kategori: 'kira_geliri',   tarih: '2025-03-01', tutar: 5500,  odemeYontemi: 'banka', aciklama: 'Şube derslik kiralama geliri',     belgeNo: 'GLR-2025-0316', ogrenciAd: '' },
 ];
