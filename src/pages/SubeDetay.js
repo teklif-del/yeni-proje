@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { SIRKETLER, SUBELER, OGRENCILER, PERSONEL, ARACLAR, GELIRLER, GIDERLER } from '../data/mockData';
+import React, { useState, useMemo, useEffect } from 'react';
+import { dbSubeler, dbSirketler, dbOgrenciler, dbPersonel, dbAraclar, dbGelirler, dbGiderler } from '../lib/db';
 import Modal from '../components/Modal';
 
 const AY_ADLARI = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
@@ -42,18 +42,37 @@ function InfoSatir({ etiket, deger, renk }) {
 export default function SubeDetay({ subeId, navigate }) {
   const [aktifTab, setAktifTab] = useState('ozet');
   const [duzenleModal, setDuzenleModal] = useState(false);
-  const [subeListe, setSubeListe] = useState(SUBELER);
+  const [subeListe, setSubeListe] = useState([]);
+  const [sirketler, setSirketler] = useState([]);
+  const [allOgrenciler, setAllOgrenciler] = useState([]);
+  const [allPersonel, setAllPersonel] = useState([]);
+  const [allAraclar, setAllAraclar] = useState([]);
+  const [allGelirler, setAllGelirler] = useState([]);
+  const [allGiderler, setAllGiderler] = useState([]);
   const [form, setForm] = useState({});
+  const [yukleniyor, setYukleniyor] = useState(true);
+
+  useEffect(() => {
+    async function yukle() {
+      const [sub, sir, ogr, per, ara, gel, gid] = await Promise.all([
+        dbSubeler.getAll(), dbSirketler.getAll(), dbOgrenciler.getAll(),
+        dbPersonel.getAll(), dbAraclar.getAll(), dbGelirler.getAll(), dbGiderler.getAll(),
+      ]);
+      setSubeListe(sub); setSirketler(sir); setAllOgrenciler(ogr);
+      setAllPersonel(per); setAllAraclar(ara); setAllGelirler(gel); setAllGiderler(gid);
+      setYukleniyor(false);
+    }
+    yukle();
+  }, [subeId]);
 
   const sube   = subeListe.find(s => s.id === subeId);
-  const sirket = sube ? SIRKETLER.find(s => s.id === sube.sirketId) : null;
+  const sirket = sube ? sirketler.find(s => s.id === (sube.sirket_id || sube.sirketId)) : null;
 
-  // Bu şubeye ait veriler
-  const subeOgrenciler  = useMemo(() => OGRENCILER.filter(o => o.subeId === subeId), [subeId]);
-  const subePersonel    = useMemo(() => PERSONEL.filter(p => p.subeId === subeId), [subeId]);
-  const subeAraclar     = useMemo(() => ARACLAR.filter(a => a.subeId === subeId), [subeId]);
-  const subeGelirler    = useMemo(() => GELIRLER.filter(g => g.subeId === subeId), [subeId]);
-  const subeGiderler    = useMemo(() => GIDERLER.filter(g => g.subeId === subeId), [subeId]);
+  const subeOgrenciler  = useMemo(() => allOgrenciler.filter(o => o.subeId === subeId), [allOgrenciler, subeId]);
+  const subePersonel    = useMemo(() => allPersonel.filter(p => p.subeId === subeId), [allPersonel, subeId]);
+  const subeAraclar     = useMemo(() => allAraclar.filter(a => a.subeId === subeId), [allAraclar, subeId]);
+  const subeGelirler    = useMemo(() => allGelirler.filter(g => g.subeId === subeId), [allGelirler, subeId]);
+  const subeGiderler    = useMemo(() => allGiderler.filter(g => g.subeId === subeId), [allGiderler, subeId]);
 
   const toplamGelir    = subeGelirler.reduce((s, g) => s + g.tutar, 0);
   const toplamGider    = subeGiderler.reduce((s, g) => s + g.tutar, 0);
@@ -62,6 +81,15 @@ export default function SubeDetay({ subeId, navigate }) {
   const tahsilatOrani  = subeOgrenciler.length > 0
     ? Math.round(subeOgrenciler.reduce((s,o)=>s+o.odenenUcret,0) / (subeOgrenciler.reduce((s,o)=>s+o.toplamUcret,0)||1) * 100)
     : 0;
+
+  if (yukleniyor) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', flexDirection: 'column', gap: '16px' }}>
+        <div style={{ fontSize: '48px' }}>⏳</div>
+        <div style={{ fontSize: '16px', color: '#64748B', fontWeight: '600' }}>Yükleniyor...</div>
+      </div>
+    );
+  }
 
   if (!sube || !sirket) {
     return (
@@ -555,7 +583,7 @@ export default function SubeDetay({ subeId, navigate }) {
                     {ks.aktif ? '✅ Aktif' : '❌ Pasif'}
                   </span>
                   <span style={{ background: '#EDE9FE', color: '#5B21B6', padding: '3px 8px', borderRadius: '8px', fontSize: '11px', fontWeight: '700' }}>
-                    {OGRENCILER.filter(o => o.subeId === ks.id).length} öğrenci
+                    {allOgrenciler.filter(o => o.subeId === ks.id).length} öğrenci
                   </span>
                 </div>
               </div>

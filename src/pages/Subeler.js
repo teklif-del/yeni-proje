@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { SIRKETLER, SUBELER, OGRENCILER, PERSONEL } from '../data/mockData';
+import React, { useState, useEffect } from 'react';
+import { dbSubeler, dbSirketler, dbOgrenciler, dbPersonel } from '../lib/db';
 import Modal from '../components/Modal';
 
 const bosForm = { ad: '', sehir: '', ilce: '', adres: '', telefon: '', sirketId: '', aktif: true };
@@ -14,7 +14,13 @@ function InfoSatir({ etiket, deger, renk }) {
 }
 
 function Subeler({ navigate, secilenSirketId }) {
-  const [liste, setListe] = useState(SUBELER);
+  const [liste, setListe] = useState([]);
+  const [sirketler, setSirketler] = useState([]);
+  const [ogrenciler, setOgrenciler] = useState([]);
+  const [personel, setPersonel] = useState([]);
+  const [yukleniyor, setYukleniyor] = useState(true);
+  const [kaydediyor, setKaydediyor] = useState(false);
+
   const [secilenSirket, setSecilenSirket] = useState(secilenSirketId ? secilenSirketId.toString() : 'tumu');
   const [aramaMetni, setAramaMetni] = useState('');
 
@@ -24,33 +30,74 @@ function Subeler({ navigate, secilenSirketId }) {
   const [silOnay, setSilOnay] = useState(null);
   const [form, setForm] = useState(bosForm);
 
+  useEffect(() => {
+    async function yukle() {
+      const [sub, sir, ogr, per] = await Promise.all([
+        dbSubeler.getAll(),
+        dbSirketler.getAll(),
+        dbOgrenciler.getAll(),
+        dbPersonel.getAll(),
+      ]);
+      setListe(sub);
+      setSirketler(sir);
+      setOgrenciler(ogr);
+      setPersonel(per);
+      setYukleniyor(false);
+    }
+    yukle();
+  }, []);
+
   const filtrelenenler = liste.filter(s => {
-    const sirketEsles = secilenSirket === 'tumu' || s.sirketId === parseInt(secilenSirket);
+    const sirketId = s.sirket_id || s.sirketId;
+    const sirketEsles = secilenSirket === 'tumu' || sirketId === parseInt(secilenSirket);
     const aramaEsles = aramaMetni === '' ||
-      s.ad.toLowerCase().includes(aramaMetni.toLowerCase()) ||
-      s.sehir.toLowerCase().includes(aramaMetni.toLowerCase()) ||
-      s.ilce.toLowerCase().includes(aramaMetni.toLowerCase());
+      (s.ad || '').toLowerCase().includes(aramaMetni.toLowerCase()) ||
+      (s.sehir || '').toLowerCase().includes(aramaMetni.toLowerCase()) ||
+      (s.ilce || '').toLowerCase().includes(aramaMetni.toLowerCase());
     return sirketEsles && aramaEsles;
   });
 
-  const kaydet = () => {
+  const kaydet = async () => {
     if (!form.ad || !form.sirketId) { alert('Şube adı ve şirket zorunludur!'); return; }
+    setKaydediyor(true);
     if (duzenleModal) {
-      setListe(prev => prev.map(s => s.id === duzenleModal.id
-        ? { ...duzenleModal, ...form, sirketId: parseInt(form.sirketId) }
-        : s));
+      const guncellenen = await dbSubeler.update(duzenleModal.id, {
+        ...form,
+        sirket_id: parseInt(form.sirketId),
+      });
+      if (guncellenen) {
+        // normalize
+        const row = { ...guncellenen, sirketId: guncellenen.sirket_id || guncellened?.sirketId };
+        setListe(prev => prev.map(s => s.id === duzenleModal.id ? { ...s, ...form, sirket_id: parseInt(form.sirketId) } : s));
+      }
       setDuzenleModal(null);
     } else {
-      setListe(prev => [...prev, { ...form, id: Date.now(), sirketId: parseInt(form.sirketId), aktif: true }]);
+      // Supabase insert via supabase directly (dbSubeler only has update/getAll)
+      // Use dbSubeler or direct insert
+      const { supabase } = await import('../lib/supabase');
+      const { data, error } = await supabase.from('subeler').insert({
+        ad: form.ad, sehir: form.sehir || '', ilce: form.ilce || '',
+        adres: form.adres || '', telefon: form.telefon || '',
+        sirket_id: parseInt(form.sirketId), aktif: form.aktif !== false,
+      }).select().single();
+      if (!error && data) {
+        setListe(prev => [...prev, { ...data, sirketId: data.sirket_id }]);
+      }
       setYeniModal(false);
     }
     setForm(bosForm);
+    setKaydediyor(false);
   };
 
-  const sil = (id) => { setListe(prev => prev.filter(s => s.id !== id)); setSilOnay(null); setDetayModal(null); };
+  const sil = async (id) => {
+    const { supabase } = await import('../lib/supabase');
+    const { error } = await supabase.from('subeler').delete().eq('id', id);
+    if (!error) setListe(prev => prev.filter(s => s.id !== id));
+    setSilOnay(null); setDetayModal(null);
+  };
 
   const acDuzenle = (s) => {
-    setForm({ ...s, sirketId: s.sirketId?.toString() });
+    setForm({ ...s, sirketId: (s.sirket_id || s.sirketId)?.toString() });
     setDuzenleModal(s);
   };
 
@@ -73,6 +120,15 @@ function Subeler({ navigate, secilenSirketId }) {
     </div>
   );
 
+  if (yukleniyor) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', flexDirection: 'column', gap: '16px' }}>
+        <div style={{ fontSize: '48px' }}>⏳</div>
+        <div style={{ fontSize: '16px', color: '#64748B', fontWeight: '600' }}>Şubeler yükleniyor...</div>
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="sayfa-baslik">
@@ -85,13 +141,16 @@ function Subeler({ navigate, secilenSirketId }) {
         <button className={`btn ${secilenSirket === 'tumu' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSecilenSirket('tumu')}>
           🏢 Tümü ({liste.length})
         </button>
-        {SIRKETLER.map(s => (
-          <button key={s.id} className="btn btn-secondary"
-            style={{ borderLeft: `4px solid ${s.renk}`, background: secilenSirket === s.id.toString() ? s.renk + '18' : '' }}
-            onClick={() => setSecilenSirket(s.id.toString())}>
-            {s.ikon} {s.ad.split(' ')[0]} ({liste.filter(sb => sb.sirketId === s.id).length})
-          </button>
-        ))}
+        {sirketler.map(s => {
+          const count = liste.filter(sb => (sb.sirket_id || sb.sirketId) === s.id).length;
+          return (
+            <button key={s.id} className="btn btn-secondary"
+              style={{ borderLeft: `4px solid ${s.renk}`, background: secilenSirket === s.id.toString() ? s.renk + '18' : '' }}
+              onClick={() => setSecilenSirket(s.id.toString())}>
+              {s.ikon} {s.ad} ({count})
+            </button>
+          );
+        })}
       </div>
 
       {/* Arama */}
@@ -112,10 +171,13 @@ function Subeler({ navigate, secilenSirketId }) {
               <tr><th>Şube Adı</th><th>Şirket</th><th>Şehir / İlçe</th><th>Öğrenci</th><th>Personel</th><th>Durum</th><th>İşlem</th></tr>
             </thead>
             <tbody>
+              {filtrelenenler.length === 0 && (
+                <tr><td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: '#64748B' }}>Şube bulunamadı.</td></tr>
+              )}
               {filtrelenenler.map(sube => {
-                const sirket = SIRKETLER.find(s => s.id === sube.sirketId);
-                const subeOgrenci = OGRENCILER.filter(o => o.subeId === sube.id).length;
-                const subePersonel = PERSONEL.filter(p => p.subeId === sube.id).length;
+                const sirket = sirketler.find(s => s.id === (sube.sirket_id || sube.sirketId));
+                const subeOgrenci = ogrenciler.filter(o => o.subeId === sube.id).length;
+                const subePersonel = personel.filter(p => p.subeId === sube.id).length;
                 return (
                   <tr key={sube.id}>
                     <td>
@@ -125,7 +187,7 @@ function Subeler({ navigate, secilenSirketId }) {
                     <td>
                       <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <span className="renk-nokta" style={{ background: sirket?.renk }} />
-                        <span className="text-sm">{sirket?.ikon} {sirket?.ad.split(' ')[0]}</span>
+                        <span className="text-sm">{sirket?.ikon} {sirket?.ad}</span>
                       </span>
                     </td>
                     <td>
@@ -141,7 +203,7 @@ function Subeler({ navigate, secilenSirketId }) {
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: '4px' }}>
-                        <button className="btn btn-secondary btn-sm" title="Detay" onClick={() => navigate ? navigate('sube_detay', { subeId: sube.id, sirketId: sube.sirketId }) : setDetayModal(sube)}>👁</button>
+                        <button className="btn btn-secondary btn-sm" title="Detay" onClick={() => navigate ? navigate('sube_detay', { subeId: sube.id, sirketId: sube.sirket_id || sube.sirketId }) : setDetayModal(sube)}>👁</button>
                         <button className="btn btn-secondary btn-sm" title="Düzenle" onClick={() => acDuzenle(sube)}>✏️</button>
                         <button className="btn btn-danger btn-sm" title="Sil" onClick={() => setSilOnay(sube)}>🗑️</button>
                       </div>
@@ -154,12 +216,12 @@ function Subeler({ navigate, secilenSirketId }) {
         </div>
       </div>
 
-      {/* ===== DETAY MODAL ===== */}
+      {/* DETAY MODAL */}
       <Modal acik={!!detayModal} kapat={() => setDetayModal(null)} baslik={`🏢 ${detayModal?.ad}`} genislik="520px">
         {detayModal && (() => {
-          const sirket = SIRKETLER.find(s => s.id === detayModal.sirketId);
-          const subeOgrenciler = OGRENCILER.filter(o => o.subeId === detayModal.id);
-          const subePersoneller = PERSONEL.filter(p => p.subeId === detayModal.id);
+          const sirket = sirketler.find(s => s.id === (detayModal.sirket_id || detayModal.sirketId));
+          const subeOgrenciler = ogrenciler.filter(o => o.subeId === detayModal.id);
+          const subePersoneller = personel.filter(p => p.subeId === detayModal.id);
           const aktifOgrenci = subeOgrenciler.filter(o => o.durum === 'devam_ediyor').length;
           return (
             <>
@@ -194,7 +256,7 @@ function Subeler({ navigate, secilenSirketId }) {
         })()}
       </Modal>
 
-      {/* ===== YENİ / DÜZENLE MODAL ===== */}
+      {/* YENİ / DÜZENLE MODAL */}
       <Modal
         acik={yeniModal || !!duzenleModal}
         kapat={() => { setYeniModal(false); setDuzenleModal(null); setForm(bosForm); }}
@@ -203,7 +265,7 @@ function Subeler({ navigate, secilenSirketId }) {
       >
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
           <div style={{ gridColumn: '1 / -1' }}><FormAlani label="Şube Adı *" name="ad" /></div>
-          <FormAlani label="Şirket *" name="sirketId" options={SIRKETLER.map(s => ({ value: s.id, label: `${s.ikon} ${s.ad}` }))} />
+          <FormAlani label="Şirket *" name="sirketId" options={sirketler.map(s => ({ value: s.id, label: `${s.ikon} ${s.ad}` }))} />
           <FormAlani label="Telefon" name="telefon" />
           <FormAlani label="Şehir" name="sehir" />
           <FormAlani label="İlçe" name="ilce" />
@@ -219,11 +281,11 @@ function Subeler({ navigate, secilenSirketId }) {
         </div>
         <div style={{ display: 'flex', gap: '8px', marginTop: '20px', justifyContent: 'flex-end' }}>
           <button className="btn btn-secondary" onClick={() => { setYeniModal(false); setDuzenleModal(null); setForm(bosForm); }}>İptal</button>
-          <button className="btn btn-primary" onClick={kaydet}>{duzenleModal ? '💾 Güncelle' : '✅ Kaydet'}</button>
+          <button className="btn btn-primary" disabled={kaydediyor} onClick={kaydet}>{kaydediyor ? '⏳ Kaydediliyor...' : duzenleModal ? '💾 Güncelle' : '✅ Kaydet'}</button>
         </div>
       </Modal>
 
-      {/* ===== SİL ONAY ===== */}
+      {/* SİL ONAY */}
       <Modal acik={!!silOnay} kapat={() => setSilOnay(null)} baslik="🗑️ Şube Sil" genislik="380px">
         {silOnay && (
           <>

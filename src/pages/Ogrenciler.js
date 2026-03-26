@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { OGRENCILER, SUBELER, SIRKETLER } from '../data/mockData';
+import React, { useState, useMemo, useEffect } from 'react';
+import { dbOgrenciler, dbSubeler, dbSirketler } from '../lib/db';
 import Modal from '../components/Modal';
 
 // ─── PSİKOTEKNİK TEST KATEGORİLERİ ────────────────────────
@@ -32,16 +32,12 @@ const getSinavSabit = (kurstipi) => {
 
 // ─── YARDIMCI KONTROLLER ───────────────────────────────────
 const isPsiko = (ogr) => {
-  const sube = SUBELER.find(s => s.id === ogr.subeId);
-  return sube?.sirketId === 4 || ogr.kurstipi === 'Psikoteknik';
+  return ogr.kurstipi === 'Psikoteknik';
 };
 
 const isSRC = (ogr) => {
-  const sube = SUBELER.find(s => s.id === ogr.subeId);
   const tumSrcKurslar = [...SRC24_KURS, ...SRC5TMGD_KURS];
-  // sirketId 3=SRC Kursu, 5=SRC 5, 6=TMGD
-  return sube?.sirketId === 3 || sube?.sirketId === 5 || sube?.sirketId === 6 ||
-    tumSrcKurslar.some(k => (ogr.kurstipi || '').includes(k));
+  return tumSrcKurslar.some(k => (ogr.kurstipi || '').includes(k));
 };
 
 const getSRCDurum = (src, kurstipi) => {
@@ -635,7 +631,11 @@ function PsikoPanel({ ogr, onGuncelle }) {
 //  ANA SAYFA
 // ═══════════════════════════════════════════════════════════
 export default function Ogrenciler() {
-  const [liste, setListe]           = useState(BASLANGIC_OGRENCILER);
+  const [liste, setListe]           = useState([]);
+  const [subeler, setSubeler]       = useState([]);
+  const [sirketler, setSirketler]   = useState([]);
+  const [yukleniyor, setYukleniyor] = useState(true);
+  const [kaydediyor, setKaydediyor] = useState(false);
   const [aramaMetni, setAramaMetni] = useState('');
   const [durumFiltre, setDurumFiltre]   = useState('tumu');
   const [sirketFiltre, setSirketFiltre] = useState('tumu');
@@ -649,14 +649,30 @@ export default function Ogrenciler() {
   const [yeniOdeme, setYeniOdeme]       = useState('');
   const [detaySekme, setDetaySekme]     = useState('bilgiler');
 
+  // ── Veri Yükle ──
+  useEffect(() => {
+    async function yukle() {
+      const [ogr, sub, sir] = await Promise.all([
+        dbOgrenciler.getAll(),
+        dbSubeler.getAll(),
+        dbSirketler.getAll(),
+      ]);
+      setListe(ogr);
+      setSubeler(sub);
+      setSirketler(sir);
+      setYukleniyor(false);
+    }
+    yukle();
+  }, []);
+
   // ── Filtreleme ──
   const filtrelenenler = useMemo(() => liste.filter(o => {
     const aramaEsles = aramaMetni==='' ||
       `${o.ad} ${o.soyad}`.toLowerCase().includes(aramaMetni.toLowerCase()) ||
       (o.tc||'').includes(aramaMetni) || (o.telefon||'').includes(aramaMetni);
     const durumEsles  = durumFiltre==='tumu' || o.durum===durumFiltre;
-    const sube        = SUBELER.find(s => s.id===o.subeId);
-    const sirketEsles = sirketFiltre==='tumu' || sube?.sirketId===parseInt(sirketFiltre);
+    const sube        = subeler.find(s => s.id===o.subeId);
+    const sirketEsles = sirketFiltre==='tumu' || (sube?.sirket_id||sube?.sirketId)===parseInt(sirketFiltre);
     const tabEsles    = aktifTab==='tumu' ||
       (aktifTab==='psiko' && isPsiko(o)) ||
       (aktifTab==='src'   && isSRC(o));
@@ -676,14 +692,17 @@ export default function Ogrenciler() {
   const bugun = new Date().toISOString().split('T')[0];
   const bugunRandevular = useMemo(() => psikoOgrenciler.filter(o=>o.psiko?.randevuTarihi===bugun&&o.psiko?.randevuDurumu==='bekliyor'), [psikoOgrenciler, bugun]);
 
-  const ogrenciGuncelle = (guncel) => {
+  const ogrenciGuncelle = async (guncel) => {
+    // Supabase'e kaydet
+    await dbOgrenciler.update(guncel.id, guncel);
     setListe(prev => prev.map(o=>o.id===guncel.id?guncel:o));
     if (detayModal?.id===guncel.id) setDetayModal(guncel);
   };
 
-  const kaydet = () => {
+  const kaydet = async () => {
     if (!form.ad||!form.soyad||!form.tc) { alert('Ad, Soyad ve TC zorunludur!'); return; }
-    const psikoMu = SUBELER.find(s=>s.id===parseInt(form.subeId))?.sirketId===4 || form.kurstipi==='Psikoteknik';
+    setKaydediyor(true);
+    const psikoMu = subeler.find(s=>s.id===parseInt(form.subeId))?.sirket_id===4 || form.kurstipi==='Psikoteknik';
     const mevcutPsiko = duzenleModal?.psiko || { ...BOS_PSIKO };
     const psikoObj = psikoMu ? {
       ...mevcutPsiko,
@@ -700,27 +719,38 @@ export default function Ogrenciler() {
       psiko: psikoObj,
     };
     if (duzenleModal) {
-      setListe(prev=>prev.map(o=>o.id===duzenleModal.id?{...duzenleModal,...obj}:o));
+      const guncellenen = await dbOgrenciler.update(duzenleModal.id, obj);
+      if (guncellenen) {
+        setListe(prev=>prev.map(o=>o.id===duzenleModal.id?guncellenen:o));
+        if (detayModal?.id===duzenleModal.id) setDetayModal(guncellenen);
+      }
       setDuzenleModal(null);
     } else {
-      setListe(prev=>[{...obj,id:Date.now()},...prev]);
+      const yeni = await dbOgrenciler.insert(obj);
+      if (yeni) setListe(prev=>[yeni,...prev]);
       setYeniModal(false);
     }
     setForm(BOS_FORM);
+    setKaydediyor(false);
   };
 
-  const odemeEkleDuzgun = () => {
+  const odemeEkleDuzgun = async () => {
     const tutar = parseInt(yeniOdeme);
     if (!tutar||tutar<=0) { alert('Geçerli bir tutar girin!'); return; }
-    setListe(prev=>prev.map(o=>{
-      if (o.id!==odemeModal.id) return o;
-      const yeniOdenen = Math.min(o.odenenUcret+tutar, o.toplamUcret);
-      return {...o, odenenUcret:yeniOdenen, durum:yeniOdenen>=o.toplamUcret?'tamamladi':o.durum};
-    }));
+    const ogr = liste.find(o => o.id === odemeModal.id);
+    if (!ogr) return;
+    const yeniOdenen = Math.min(ogr.odenenUcret + tutar, ogr.toplamUcret);
+    const guncelDurum = yeniOdenen >= ogr.toplamUcret ? 'tamamladi' : ogr.durum;
+    const guncellenen = await dbOgrenciler.update(ogr.id, { odenenUcret: yeniOdenen, durum: guncelDurum });
+    if (guncellenen) setListe(prev=>prev.map(o=>o.id===ogr.id?guncellenen:o));
     setOdemeModal(null); setYeniOdeme('');
   };
 
-  const sil = (id) => { setListe(prev=>prev.filter(o=>o.id!==id)); setSilOnay(null); setDetayModal(null); };
+  const sil = async (id) => {
+    const ok = await dbOgrenciler.delete(id);
+    if (ok) setListe(prev=>prev.filter(o=>o.id!==id));
+    setSilOnay(null); setDetayModal(null);
+  };
 
   const acDuzenle = (ogr) => {
     setForm({
@@ -752,9 +782,18 @@ export default function Ogrenciler() {
   );
 
   const formPsikoMu = useMemo(() => {
-    const sube = SUBELER.find(s=>s.id===parseInt(form.subeId));
-    return sube?.sirketId===4 || form.kurstipi==='Psikoteknik';
-  }, [form.subeId, form.kurstipi]);
+    const sube = subeler.find(s=>s.id===parseInt(form.subeId));
+    return (sube?.sirket_id||sube?.sirketId)===4 || form.kurstipi==='Psikoteknik';
+  }, [form.subeId, form.kurstipi, subeler]);
+
+  if (yukleniyor) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', flexDirection: 'column', gap: '16px' }}>
+        <div style={{ fontSize: '48px' }}>⏳</div>
+        <div style={{ fontSize: '16px', color: '#64748B', fontWeight: '600' }}>Öğrenciler yükleniyor...</div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -859,7 +898,7 @@ export default function Ogrenciler() {
           <select style={{ padding:'9px 12px', border:'1.5px solid #E2E8F0', borderRadius:'8px', fontSize:'13px', outline:'none', background:'white' }}
             value={sirketFiltre} onChange={e=>setSirketFiltre(e.target.value)}>
             <option value="tumu">Tüm Şirketler</option>
-            {SIRKETLER.map(s=><option key={s.id} value={s.id}>{s.ikon} {s.ad.split(' ')[0]}</option>)}
+            {sirketler.map(s=><option key={s.id} value={s.id}>{s.ikon} {s.ad}</option>)}
           </select>
         )}
         <button className="btn btn-primary" onClick={()=>{ setForm(BOS_FORM); setYeniModal(true); }}>+ Öğrenci Ekle</button>
@@ -890,8 +929,8 @@ export default function Ogrenciler() {
             </thead>
             <tbody>
               {filtrelenenler.map(ogr => {
-                const sube       = SUBELER.find(s=>s.id===ogr.subeId);
-                const sirket     = SIRKETLER.find(s=>s.id===sube?.sirketId);
+                const sube       = subeler.find(s=>s.id===ogr.subeId);
+                const sirket     = sirketler.find(s=>s.id===(sube?.sirket_id||sube?.sirketId));
                 const odemeOrani = ogr.toplamUcret>0 ? Math.round((ogr.odenenUcret/ogr.toplamUcret)*100) : 0;
                 const kalan      = ogr.toplamUcret - ogr.odenenUcret;
                 const psikoMu    = isPsiko(ogr);
@@ -998,8 +1037,8 @@ export default function Ogrenciler() {
       <Modal acik={!!detayModal} kapat={()=>setDetayModal(null)}
         baslik={`👨‍🎓 ${detayModal?.ad} ${detayModal?.soyad}`} genislik="700px">
         {detayModal && (() => {
-          const sube       = SUBELER.find(s=>s.id===detayModal.subeId);
-          const sirket     = SIRKETLER.find(s=>s.id===sube?.sirketId);
+          const sube       = subeler.find(s=>s.id===detayModal.subeId);
+          const sirket     = sirketler.find(s=>s.id===(sube?.sirket_id||sube?.sirketId));
           const odemeOrani = detayModal.toplamUcret>0 ? Math.round((detayModal.odenenUcret/detayModal.toplamUcret)*100) : 0;
           const psikoMu    = isPsiko(detayModal);
           const srcMu      = isSRC(detayModal);
@@ -1119,7 +1158,7 @@ export default function Ogrenciler() {
           <FormAlani label="Telefon"   name="telefon" />
           <FormAlani label="E-posta"   name="email" tip="email" />
           <FormAlani label="Kayıt Tarihi" name="kayitTarihi" tip="date" />
-          <FormAlani label="Şube" name="subeId" options={SUBELER.map(s=>({ value:s.id, label:`${SIRKETLER.find(sr=>sr.id===s.sirketId)?.ikon||''} ${s.ad}` }))} />
+          <FormAlani label="Şube" name="subeId" options={subeler.map(s=>({ value:s.id, label:`${sirketler.find(sr=>sr.id===(s.sirket_id||s.sirketId))?.ikon||''} ${s.ilce||s.ad}` }))} />
           <FormAlani label="Kurs Tipi" name="kurstipi" options={['A Sınıfı','A1','A2','B Sınıfı','C Sınıfı','D Sınıfı','E Sınıfı','SRC 2','SRC 4','SRC 5','Forklift','Vinç','Ekskavatör','Psikoteknik','TMGD Temel','TMGD Yenileme'].map(k=>({ value:k, label:k }))} />
           <FormAlani label="Toplam Ücret (₺)" name="toplamUcret" tip="number" />
           <FormAlani label="Ödenen Ücret (₺)" name="odenenUcret" tip="number" />

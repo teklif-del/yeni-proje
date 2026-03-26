@@ -460,8 +460,8 @@ export default function GiderlerPage() {
               <tbody>
                 {giderler.filter(g=>g.durum==='bekliyor').sort((a,b)=>new Date(a.tarih)-new Date(b.tarih)).map(g=>{
                   const kat  = KAT_MAP[g.kategori];
-                  const sube = SUBELER.find(s=>s.id===g.subeId);
-                  const sirket = SIRKETLER.find(s=>s.id===sube?.sirketId);
+                  const sube = subeler.find(s=>s.id===g.subeId);
+                  const sirket = sirketler.find(s=>s.id===(sube?.sirket_id||sube?.sirketId));
                   const gecmis = new Date(g.tarih) < new Date();
                   return (
                     <tr key={g.id} style={{ background: gecmis ? '#FFF5F5' : 'white' }}>
@@ -474,7 +474,7 @@ export default function GiderlerPage() {
                           </div>
                         </div>
                       </td>
-                      <td className="text-sm">{sirket?.ikon} {sube?.ilce}</td>
+                      <td className="text-sm">{sirket?.ikon} {sube?.ilce||sube?.ad}</td>
                       <td className="text-sm">{g.aciklama}</td>
                       <td>
                         <span style={{ color: gecmis?'#EF4444':'#374151', fontWeight: gecmis?'700':'400', fontSize:'13px' }}>

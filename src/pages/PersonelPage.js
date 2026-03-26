@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { PERSONEL, SUBELER, SIRKETLER } from '../data/mockData';
+import React, { useState, useEffect } from 'react';
+import { dbPersonel, dbSubeler, dbSirketler } from '../lib/db';
 import {
   MAAS_ODEMELERI, IZIN_KAYITLARI, MESAI_KAYITLARI,
   GEC_GELME_KAYITLARI, IZIN_HAKLARI, tazminatHesapla, AYLAR
@@ -36,12 +36,32 @@ function SekmeBar({ tabs, aktif, setAktif }) {
 ───────────────────────────────────────────────────────────── */
 function PersonelPage() {
   /* liste state */
-  const [personelListe, setPersonelListe] = useState(PERSONEL);
+  const [personelListe, setPersonelListe] = useState([]);
+  const [subeler, setSubeler] = useState([]);
+  const [sirketler, setSirketler] = useState([]);
+  const [yukleniyor, setYukleniyor] = useState(true);
+  const [kaydediyor, setKaydediyor] = useState(false);
   const [maaslar, setMaaslar] = useState(MAAS_ODEMELERI);
   const [izinler, setIzinler] = useState(IZIN_KAYITLARI);
   const [mesailer, setMesailer] = useState(MESAI_KAYITLARI);
   const [gecGelmeler, setGecGelmeler] = useState(GEC_GELME_KAYITLARI);
   const [izinHaklari] = useState(IZIN_HAKLARI);
+
+  /* veri yükle */
+  useEffect(() => {
+    async function yukle() {
+      const [per, sub, sir] = await Promise.all([
+        dbPersonel.getAll(),
+        dbSubeler.getAll(),
+        dbSirketler.getAll(),
+      ]);
+      setPersonelListe(per);
+      setSubeler(sub);
+      setSirketler(sir);
+      setYukleniyor(false);
+    }
+    yukle();
+  }, []);
 
   /* filtre */
   const [aramaMetni, setAramaMetni] = useState('');
@@ -77,9 +97,9 @@ function PersonelPage() {
 
   /* ── filtreli liste ── */
   const filtrelenenler = personelListe.filter(p => {
-    const esles = aramaMetni === '' || `${p.ad} ${p.soyad}`.toLowerCase().includes(aramaMetni.toLowerCase()) || p.pozisyon.toLowerCase().includes(aramaMetni.toLowerCase());
-    const sube = SUBELER.find(s => s.id === p.subeId);
-    return esles && (sirketFiltre === 'tumu' || sube?.sirketId === parseInt(sirketFiltre));
+    const esles = aramaMetni === '' || `${p.ad} ${p.soyad}`.toLowerCase().includes(aramaMetni.toLowerCase()) || (p.pozisyon||'').toLowerCase().includes(aramaMetni.toLowerCase());
+    const sube = subeler.find(s => s.id === p.subeId);
+    return esles && (sirketFiltre === 'tumu' || (sube?.sirket_id||sube?.sirketId) === parseInt(sirketFiltre));
   });
 
   /* ── hesaplamalar ── */
@@ -87,19 +107,28 @@ function PersonelPage() {
   const bekleyenOdeme = maaslar.filter(m => m.durum === 'bekliyor').length;
 
   /* ── personel form kaydet ── */
-  const personelKaydet = () => {
+  const personelKaydet = async () => {
     if (!personelForm.ad || !personelForm.soyad) { alert('Ad ve Soyad zorunludur!'); return; }
+    setKaydediyor(true);
+    const obj = { ...personelForm, subeId: parseInt(personelForm.subeId) || null, maas: parseInt(personelForm.maas) || 0, aktif: personelForm.aktif !== false };
     if (personelDuzenle) {
-      setPersonelListe(prev => prev.map(p => p.id === personelDuzenle.id ? { ...personelDuzenle, ...personelForm, subeId: parseInt(personelForm.subeId), maas: parseInt(personelForm.maas) || 0 } : p));
+      const guncellenen = await dbPersonel.update(personelDuzenle.id, obj);
+      if (guncellenen) setPersonelListe(prev => prev.map(p => p.id === personelDuzenle.id ? guncellenen : p));
       setPersonelDuzenle(null);
     } else {
-      setPersonelListe(prev => [{ ...personelForm, id: Date.now(), subeId: parseInt(personelForm.subeId), maas: parseInt(personelForm.maas) || 0, aktif: true }, ...prev]);
+      const yeni = await dbPersonel.insert(obj);
+      if (yeni) setPersonelListe(prev => [yeni, ...prev]);
       setPersonelYeni(false);
     }
     setPersonelForm(bosPersonelForm);
+    setKaydediyor(false);
   };
 
-  const personelSil = (id) => { setPersonelListe(prev => prev.filter(p => p.id !== id)); setSilOnay(null); setSecilenPersonel(null); };
+  const personelSil = async (id) => {
+    const ok = await dbPersonel.delete(id);
+    if (ok) setPersonelListe(prev => prev.filter(p => p.id !== id));
+    setSilOnay(null); setSecilenPersonel(null);
+  };
   const acDuzenle = (p) => { setPersonelForm({ ...p, subeId: p.subeId?.toString(), maas: p.maas?.toString() }); setPersonelDuzenle(p); };
 
   /* ── maaş kaydet ── */
@@ -214,7 +243,7 @@ function PersonelPage() {
             <input className="arama-input" placeholder="🔍 Personel adı veya pozisyon ara..." value={aramaMetni} onChange={e => setAramaMetni(e.target.value)} />
             <select className="secim-input" value={sirketFiltre} onChange={e => setSirketFiltre(e.target.value)}>
               <option value="tumu">Tüm Şirketler</option>
-              {SIRKETLER.map(s => <option key={s.id} value={s.id}>{s.ikon} {s.ad.split(' ')[0]}</option>)}
+              {sirketler.map(s => <option key={s.id} value={s.id}>{s.ikon} {s.ad}</option>)}
             </select>
             <button className="btn btn-primary" onClick={() => { setPersonelForm(bosPersonelForm); setPersonelYeni(true); }}>+ Personel Ekle</button>
           </div>
@@ -229,9 +258,13 @@ function PersonelPage() {
                   <tr><th>Personel</th><th>Pozisyon</th><th>Şube</th><th>Maaş</th><th>İşe Giriş</th><th>İzin Hakkı</th><th>Durum</th><th>İşlem</th></tr>
                 </thead>
                 <tbody>
-                  {filtrelenenler.map(p => {
-                    const sube = SUBELER.find(s => s.id === p.subeId);
-                    const sirket = SIRKETLER.find(s => s.id === sube?.sirketId);
+                  {yukleniyor ? (
+                    <tr><td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: '#64748B' }}>⏳ Yükleniyor...</td></tr>
+                  ) : filtrelenenler.length === 0 ? (
+                    <tr><td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: '#64748B' }}>Personel bulunamadı.</td></tr>
+                  ) : filtrelenenler.map(p => {
+                    const sube = subeler.find(s => s.id === p.subeId);
+                    const sirket = sirketler.find(s => s.id === (sube?.sirket_id||sube?.sirketId));
                     const izinHak = izinHaklari.find(h => h.personelId === p.id);
                     return (
                       <tr key={p.id}>
@@ -247,7 +280,7 @@ function PersonelPage() {
                           </div>
                         </td>
                         <td><span className="badge badge-mor">{p.pozisyon}</span></td>
-                        <td><div className="text-sm">{sirket?.ikon} {sube?.ilce}</div></td>
+                        <td><div className="text-sm">{sirket?.ikon} {sube?.ilce||sube?.ad}</div></td>
                         <td><span className="para-yesil">₺{p.maas.toLocaleString('tr-TR')}</span></td>
                         <td className="text-sm">{p.iseGirisTarihi}</td>
                         <td>
@@ -332,8 +365,8 @@ function PersonelPage() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px', marginBottom: '20px' }}>
             {personelListe.map(p => {
               const hak = izinHaklari.find(h => h.personelId === p.id) || { yillikHak: 14, kullanilanGun: 0, kalanGun: 14 };
-              const sube = SUBELER.find(s => s.id === p.subeId);
-              const sirket = SIRKETLER.find(s => s.id === sube?.sirketId);
+              const sube = subeler.find(s => s.id === p.subeId);
+              const sirket = sirketler.find(s => s.id === (sube?.sirket_id||sube?.sirketId));
               return (
                 <div key={p.id} style={{ background: 'white', borderRadius: '12px', padding: '16px', boxShadow: '0 1px 3px rgba(0,0,0,0.06)', border: '1px solid #F1F5F9' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
@@ -506,8 +539,8 @@ function PersonelPage() {
       >
         {secilenPersonel && (() => {
           const p = secilenPersonel;
-          const sube = SUBELER.find(s => s.id === p.subeId);
-          const sirket = SIRKETLER.find(s => s.id === sube?.sirketId);
+          const sube = subeler.find(s => s.id === p.subeId);
+          const sirket = sirketler.find(s => s.id === (sube?.sirket_id||sube?.sirketId));
           const izinHak = izinHaklari.find(h => h.personelId === p.id) || { yillikHak: 14, kullanilanGun: 0, kalanGun: 14 };
           const kisiMaaslar = maaslar.filter(m => m.personelId === p.id).slice(0, 6);
           const kisiIzinler = izinler.filter(i => i.personelId === p.id);
@@ -524,7 +557,7 @@ function PersonelPage() {
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: '20px', fontWeight: '700', color: 'white' }}>{p.ad} {p.soyad}</div>
-                  <div style={{ fontSize: '13px', color: '#94A3B8', marginTop: '2px' }}>{p.pozisyon} · {sirket?.ikon} {sube?.ad}</div>
+                  <div style={{ fontSize: '13px', color: '#94A3B8', marginTop: '2px' }}>{p.pozisyon} · {sirket?.ikon} {sube?.ilce||sube?.ad}</div>
                   <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
                     <span style={{ background: 'rgba(255,255,255,0.1)', color: '#E2E8F0', padding: '3px 10px', borderRadius: '20px', fontSize: '12px' }}>📞 {p.telefon}</span>
                     <span style={{ background: 'rgba(255,255,255,0.1)', color: '#E2E8F0', padding: '3px 10px', borderRadius: '20px', fontSize: '12px' }}>📅 {p.iseGirisTarihi}</span>
@@ -827,13 +860,13 @@ function PersonelPage() {
           <Input label="Telefon" name="telefon" form={personelForm} setForm={setPersonelForm} />
           <Input label="E-posta" name="email" form={personelForm} setForm={setPersonelForm} tip="email" />
           <Input label="Pozisyon" name="pozisyon" form={personelForm} setForm={setPersonelForm} options={POZISYONLAR.map(p => ({ value: p, label: p }))} />
-          <Input label="Şube" name="subeId" form={personelForm} setForm={setPersonelForm} options={SUBELER.map(s => ({ value: s.id, label: `${SIRKETLER.find(sr => sr.id === s.sirketId)?.ikon} ${s.ad}` }))} />
+          <Input label="Şube" name="subeId" form={personelForm} setForm={setPersonelForm} options={subeler.map(s => ({ value: s.id, label: `${sirketler.find(sr => sr.id === (s.sirket_id||s.sirketId))?.ikon} ${s.ilce||s.ad}` }))} />
           <Input label="Brüt Maaş (₺)" name="maas" form={personelForm} setForm={setPersonelForm} tip="number" />
           <Input label="İşe Giriş Tarihi" name="iseGirisTarihi" form={personelForm} setForm={setPersonelForm} tip="date" />
         </div>
         <div style={{ display: 'flex', gap: '8px', marginTop: '20px', justifyContent: 'flex-end' }}>
           <button className="btn btn-secondary" onClick={() => { setPersonelYeni(false); setPersonelDuzenle(null); setPersonelForm(bosPersonelForm); }}>İptal</button>
-          <button className="btn btn-primary" onClick={personelKaydet}>{personelDuzenle ? '💾 Güncelle' : '✅ Kaydet'}</button>
+          <button className="btn btn-primary" disabled={kaydediyor} onClick={personelKaydet}>{kaydediyor ? '⏳ Kaydediliyor...' : personelDuzenle ? '💾 Güncelle' : '✅ Kaydet'}</button>
         </div>
       </Modal>
 

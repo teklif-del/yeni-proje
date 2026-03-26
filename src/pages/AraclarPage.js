@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { ARACLAR, SUBELER, SIRKETLER } from '../data/mockData';
+import React, { useState, useMemo, useEffect } from 'react';
+import { dbAraclar, dbSubeler, dbSirketler } from '../lib/db';
 import Modal from '../components/Modal';
 
 // ─── GİDER KATEGORİLERİ ────────────────────────────────────
@@ -366,7 +366,11 @@ function AracGiderler({ arac, giderler, setGiderler }) {
 //  ANA SAYFA
 // ═══════════════════════════════════════════════════════════
 export default function AraclarPage() {
-  const [liste, setListe] = useState(ARACLAR);
+  const [liste, setListe] = useState([]);
+  const [subeler, setSubeler] = useState([]);
+  const [sirketler, setSirketler] = useState([]);
+  const [yukleniyor, setYukleniyor] = useState(true);
+  const [kaydediyor, setKaydediyor] = useState(false);
   const [giderler, setGiderler] = useState(BASLANGIC_GIDERLER);
   const [aramaMetni, setAramaMetni] = useState('');
   const [aktifTab, setAktifTab] = useState('araclar');
@@ -381,6 +385,21 @@ export default function AraclarPage() {
   const [silOnay, setSilOnay]         = useState(null);
   const [form, setForm]               = useState(BOSFORM);
   const [bakimNotu, setBakimNotu]     = useState('');
+
+  useEffect(() => {
+    async function yukle() {
+      const [ara, sub, sir] = await Promise.all([
+        dbAraclar.getAll(),
+        dbSubeler.getAll(),
+        dbSirketler.getAll(),
+      ]);
+      setListe(ara);
+      setSubeler(sub);
+      setSirketler(sir);
+      setYukleniyor(false);
+    }
+    yukle();
+  }, []);
 
   // Hesaplar
   const toplamGider = useMemo(() => giderler.reduce((s, g) => s + g.tutar, 0), [giderler]);
@@ -418,18 +437,21 @@ export default function AraclarPage() {
     return g;
   }, [giderler, giderFiltresi]);
 
-  const kaydet = () => {
+  const kaydet = async () => {
     if (!form.plaka || !form.marka) { alert('Plaka ve Marka zorunludur!'); return; }
+    setKaydediyor(true);
+    const obj = { ...form, subeId: parseInt(form.subeId)||null, km: parseInt(form.km)||0, yil: parseInt(form.yil)||0, aktif: form.aktif !== false };
     if (duzenleModal) {
-      setListe(prev => prev.map(a => a.id === duzenleModal.id
-        ? { ...duzenleModal, ...form, subeId:parseInt(form.subeId)||0, km:parseInt(form.km)||0, yil:parseInt(form.yil)||0 }
-        : a));
+      const guncellenen = await dbAraclar.update(duzenleModal.id, obj);
+      if (guncellenen) setListe(prev => prev.map(a => a.id === duzenleModal.id ? guncellenen : a));
       setDuzenleModal(null);
     } else {
-      setListe(prev => [{ ...form, id:Date.now(), subeId:parseInt(form.subeId)||0, km:parseInt(form.km)||0, yil:parseInt(form.yil)||0, aktif:true }, ...prev]);
+      const yeni = await dbAraclar.insert(obj);
+      if (yeni) setListe(prev => [yeni, ...prev]);
       setYeniModal(false);
     }
     setForm(BOSFORM);
+    setKaydediyor(false);
   };
 
   const bakimKaydet = () => {
@@ -444,7 +466,11 @@ export default function AraclarPage() {
     setBakimModal(null); setBakimNotu('');
   };
 
-  const sil = (id) => { setListe(prev => prev.filter(a => a.id !== id)); setSilOnay(null); setDetayModal(null); };
+  const sil = async (id) => {
+    const ok = await dbAraclar.delete(id);
+    if (ok) setListe(prev => prev.filter(a => a.id !== id));
+    setSilOnay(null); setDetayModal(null);
+  };
   const acDuzenle = (a) => { setForm({ ...a, subeId:a.subeId?.toString(), km:a.km?.toString(), yil:a.yil?.toString() }); setDuzenleModal(a); };
 
   const FormAlani = ({ label, name, tip='text', options }) => (
@@ -544,9 +570,13 @@ export default function AraclarPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtrelenenler.map(arac => {
-                    const sube   = SUBELER.find(s => s.id === arac.subeId);
-                    const sirket = SIRKETLER.find(s => s.id === sube?.sirketId);
+                  {yukleniyor ? (
+                    <tr><td colSpan={9} style={{ textAlign: 'center', padding: '40px', color: '#64748B' }}>⏳ Yükleniyor...</td></tr>
+                  ) : filtrelenenler.length === 0 ? (
+                    <tr><td colSpan={9} style={{ textAlign: 'center', padding: '40px', color: '#64748B' }}>Araç bulunamadı.</td></tr>
+                  ) : filtrelenenler.map(arac => {
+                    const sube   = subeler.find(s => s.id === arac.subeId);
+                    const sirket = sirketler.find(s => s.id === (sube?.sirket_id||sube?.sirketId));
                     const aTopGider = aracGiderToplam(arac.id);
                     const aBekleyen = giderler.filter(g=>g.aracId===arac.id&&g.durum==='bekliyor').length;
                     const aYaklasan = giderler.filter(g=>{
@@ -565,7 +595,7 @@ export default function AraclarPage() {
                           <div style={{ fontSize:'11px', color:'#64748B' }}>{arac.yil} Model</div>
                         </td>
                         <td><span style={{ background:'#DBEAFE', color:'#1D4ED8', padding:'3px 9px', borderRadius:'10px', fontSize:'12px', fontWeight:'700' }}>{arac.sinif}</span></td>
-                        <td style={{ fontSize:'13px' }}>{sirket?.ikon} {sube?.ilce}</td>
+                        <td style={{ fontSize:'13px' }}>{sirket?.ikon} {sube?.ilce||sube?.ad}</td>
                         <td style={{ fontSize:'13px', fontWeight:'600' }}>{arac.km?.toLocaleString('tr-TR')} km</td>
                         <td style={{ fontSize:'12px', color:'#374151' }}>{arac.sonBakim}</td>
                         <td>
@@ -813,8 +843,8 @@ export default function AraclarPage() {
       >
         {detayModal && (() => {
           const arac   = liste.find(a => a.id === detayModal.id) || detayModal;
-          const sube   = SUBELER.find(s => s.id === arac.subeId);
-          const sirket = SIRKETLER.find(s => s.id === sube?.sirketId);
+          const sube   = subeler.find(s => s.id === arac.subeId);
+          const sirket = sirketler.find(s => s.id === (sube?.sirket_id||sube?.sirketId));
           return (
             <>
               {/* Üst Kart */}
@@ -894,7 +924,7 @@ export default function AraclarPage() {
           <FormAlani label="Sınıf" name="sinif" options={SINIFLAR.map(s=>({value:s,label:s}))} />
           <FormAlani label="Kilometre" name="km" tip="number" />
           <FormAlani label="Şube" name="subeId"
-            options={SUBELER.map(s=>({ value:s.id, label:`${SIRKETLER.find(sr=>sr.id===s.sirketId)?.ikon||''} ${s.ad}` }))} />
+            options={subeler.map(s=>({ value:s.id, label:`${sirketler.find(sr=>sr.id===(s.sirket_id||s.sirketId))?.ikon||''} ${s.ilce||s.ad}` }))} />
           <FormAlani label="Son Bakım Tarihi" name="sonBakim" tip="date" />
           <div style={{ display:'flex', flexDirection:'column', gap:'5px' }}>
             <label style={{ fontSize:'12px', fontWeight:'600', color:'#374151' }}>Durum</label>
@@ -908,7 +938,7 @@ export default function AraclarPage() {
         </div>
         <div style={{ display:'flex', gap:'8px', marginTop:'20px', justifyContent:'flex-end' }}>
           <button className="btn btn-secondary" onClick={() => { setYeniModal(false); setDuzenleModal(null); setForm(BOSFORM); }}>İptal</button>
-          <button className="btn btn-primary" onClick={kaydet}>{duzenleModal ? '💾 Güncelle' : '✅ Kaydet'}</button>
+          <button className="btn btn-primary" disabled={kaydediyor} onClick={kaydet}>{kaydediyor ? '⏳ Kaydediliyor...' : duzenleModal ? '💾 Güncelle' : '✅ Kaydet'}</button>
         </div>
       </Modal>
 

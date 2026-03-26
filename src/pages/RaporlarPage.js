@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { SIRKETLER, SUBELER, OGRENCILER, getAylikGelirGider } from '../data/mockData';
+import { dbSirketler, dbSubeler, dbOgrenciler, dbGelirler, dbGiderler } from '../lib/db';
 
 const AYLIK_OGRENCI = [
   { ay: 'Eki', surucu: 45, src: 18, psiko: 22, diger: 8 },
@@ -13,7 +13,33 @@ const AYLIK_OGRENCI = [
 
 function RaporlarPage() {
   const [seciliRapor, setSeciliRapor] = useState('genel');
-  const aylikVeri = getAylikGelirGider();
+  const [sirketler, setSirketler] = useState([]);
+  const [subeler, setSubeler] = useState([]);
+  const [ogrenciler, setOgrenciler] = useState([]);
+  const [gelirler, setGelirler] = useState([]);
+  const [giderler, setGiderler] = useState([]);
+
+  useEffect(() => {
+    async function yukle() {
+      const [sir, sub, ogr, gel, gid] = await Promise.all([
+        dbSirketler.getAll(), dbSubeler.getAll(), dbOgrenciler.getAll(),
+        dbGelirler.getAll(), dbGiderler.getAll(),
+      ]);
+      setSirketler(sir); setSubeler(sub); setOgrenciler(ogr);
+      setGelirler(gel); setGiderler(gid);
+    }
+    yukle();
+  }, []);
+
+  const AY_ADLARI = ['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas','Ara'];
+  const bugun = new Date();
+  const aylikVeri = Array.from({ length: 6 }, (_, i) => {
+    const d = new Date(bugun.getFullYear(), bugun.getMonth() - 5 + i, 1);
+    const ay = d.getMonth(); const yil = d.getFullYear();
+    const gelir = gelirler.filter(g => { const t = new Date(g.tarih); return t.getMonth() === ay && t.getFullYear() === yil; }).reduce((s, g) => s + g.tutar, 0);
+    const gider = giderler.filter(g => { const t = new Date(g.tarih); return t.getMonth() === ay && t.getFullYear() === yil; }).reduce((s, g) => s + g.tutar, 0);
+    return { ay: AY_ADLARI[ay], gelir, gider };
+  });
 
   return (
     <div>
@@ -152,9 +178,9 @@ function RaporlarPage() {
                 </tr>
               </thead>
               <tbody>
-                {SUBELER.slice(0, 10).map(sube => {
-                  const sirket = SIRKETLER.find(s => s.id === sube.sirketId);
-                  const subeOgrenci = OGRENCILER.filter(o => o.subeId === sube.id);
+                {subeler.slice(0, 10).map(sube => {
+                  const sirket = sirketler.find(s => s.id === (sube.sirket_id || sube.sirketId));
+                  const subeOgrenci = ogrenciler.filter(o => o.subeId === sube.id);
                   const tamamlayan = subeOgrenci.filter(o => o.durum === 'tamamladi').length;
                   const tamamlamaOrani = subeOgrenci.length > 0 ? Math.round((tamamlayan / subeOgrenci.length) * 100) : 0;
                   const performans = Math.floor(Math.random() * 40) + 60;
