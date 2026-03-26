@@ -10,9 +10,10 @@ const ALT_MENU = [
   { id: 'ogrenciler', ikon: '👨‍🎓', ad: 'Öğrenciler',      grup: 'YÖNETİM' },
   { id: 'personel',   ikon: '👥', ad: 'Personel',           grup: 'YÖNETİM' },
   { id: 'araclar',    ikon: '🚗', ad: 'Araçlar & Ekipman',  grup: 'YÖNETİM' },
-  { id: 'finans',     ikon: '💰', ad: 'Gelir Takibi',        grup: 'FİNANS' },
-  { id: 'giderler',   ikon: '📤', ad: 'Gider Takibi',        grup: 'FİNANS' },
-  { id: 'kira',       ikon: '🏠', ad: 'Kira Gelirleri',      grup: 'FİNANS' },
+  { id: 'finans',     ikon: '📊', ad: 'Gelir-Gider Takibi',   grup: 'FİNANS' },
+  { id: 'giderler',   ikon: '📤', ad: 'Gider Takibi',         grup: 'FİNANS' },
+  { id: 'gelirler',   ikon: '💚', ad: 'Gelir Takibi',         grup: 'FİNANS' },
+  { id: 'kira',       ikon: '🏠', ad: 'Kira Gelirleri',       grup: 'FİNANS' },
   { id: 'raporlar',   ikon: '📈', ad: 'Raporlar',            grup: 'ANALİZ' },
 ];
 

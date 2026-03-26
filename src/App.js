@@ -10,6 +10,7 @@ import AraclarPage from './pages/AraclarPage';
 import RaporlarPage from './pages/RaporlarPage';
 import KiraPage from './pages/KiraPage';
 import GiderlerPage from './pages/GiderlerPage';
+import GelirlerPage from './pages/GelirlerPage';
 import './App.css';
 
 function App() {
@@ -39,6 +40,7 @@ function App() {
       case 'araclar':    return <AraclarPage />;
       case 'raporlar':   return <RaporlarPage />;
       case 'giderler':   return <GiderlerPage />;
+      case 'gelirler':   return <GelirlerPage />;
       case 'kira':       return <KiraPage />;
       default:           return <Dashboard navigate={navigate} />;
     }
