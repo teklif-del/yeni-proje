@@ -23,27 +23,7 @@ const ODEME_MAP = Object.fromEntries(ODEME_YONTEMLERI.map(o => [o.id, o]));
 const AYLAR = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
 
 // ─── BAŞLANGIÇ GELİR VERİSİ ────────────────────────────────
-const BASLANGIC_GELIRLER = [
-  // Sürücü Kursu şubeleri
-  { id: 1,  subeId: 1,  kategori: 'kurs_ucreti',   tarih: '2025-03-05', tutar: 8500,  odemeYontemi: 'nakit', aciklama: 'B sınıfı kurs kayıt ücreti',      belgeNo: 'GLR-2025-0301', ogrenciAd: 'Ahmet Yılmaz' },
-  { id: 2,  subeId: 1,  kategori: 'kurs_ucreti',   tarih: '2025-03-10', tutar: 8500,  odemeYontemi: 'kk',    aciklama: 'B sınıfı kurs kayıt ücreti',      belgeNo: 'GLR-2025-0302', ogrenciAd: 'Fatma Demir' },
-  { id: 3,  subeId: 1,  kategori: 'sinav_ucreti',  tarih: '2025-03-15', tutar: 1200,  odemeYontemi: 'nakit', aciklama: 'Teorik sınav ücreti',              belgeNo: 'GLR-2025-0303', ogrenciAd: 'Mehmet Kaya' },
-  { id: 5,  subeId: 2,  kategori: 'kurs_ucreti',   tarih: '2025-03-07', tutar: 9200,  odemeYontemi: 'kk',    aciklama: 'C sınıfı kurs ücreti',             belgeNo: 'GLR-2025-0305', ogrenciAd: 'Ali Çelik' },
-  { id: 6,  subeId: 2,  kategori: 'kurs_ucreti',   tarih: '2025-03-12', tutar: 7800,  odemeYontemi: 'nakit', aciklama: 'B sınıfı 2. taksit',               belgeNo: 'GLR-2025-0306', ogrenciAd: 'Zeynep Yıldız' },
-  { id: 7,  subeId: 2,  kategori: 'sinav_ucreti',  tarih: '2025-03-20', tutar: 1200,  odemeYontemi: 'nakit', aciklama: 'Direksiyon sınav ücreti',           belgeNo: 'GLR-2025-0307', ogrenciAd: 'Hasan Aydın' },
-  // SRC Kursu
-  { id: 8,  subeId: 10, kategori: 'kurs_ucreti',   tarih: '2025-03-03', tutar: 4500,  odemeYontemi: 'banka', aciklama: 'SRC 2 kurs ücreti',                belgeNo: 'GLR-2025-0308', ogrenciAd: 'Fatma Çelik' },
-  { id: 9,  subeId: 10, kategori: 'kurs_ucreti',   tarih: '2025-03-08', tutar: 4800,  odemeYontemi: 'kk',    aciklama: 'SRC 4 kurs ücreti',                belgeNo: 'GLR-2025-0309', ogrenciAd: 'Özlem Güler' },
-  { id: 10, subeId: 10, kategori: 'sinav_ucreti',  tarih: '2025-03-22', tutar: 850,   odemeYontemi: 'nakit', aciklama: 'SRC sınav giriş ücreti',            belgeNo: 'GLR-2025-0310', ogrenciAd: '' },
-  { id: 11, subeId: 11, kategori: 'kurs_ucreti',   tarih: '2025-03-14', tutar: 4500,  odemeYontemi: 'banka', aciklama: 'SRC 2 kurs ücreti',                belgeNo: 'GLR-2025-0311', ogrenciAd: 'Cemil Arslan' },
-  // Psikoteknik
-  { id: 12, subeId: 13, kategori: 'kurs_ucreti',   tarih: '2025-03-06', tutar: 1200,  odemeYontemi: 'nakit', aciklama: 'Psikoteknik test ücreti',           belgeNo: 'GLR-2025-0312', ogrenciAd: 'Kemal Aydın' },
-  { id: 13, subeId: 13, kategori: 'sinav_ucreti',  tarih: '2025-03-19', tutar: 1200,  odemeYontemi: 'kk',    aciklama: 'Psikoteknik test ücreti',           belgeNo: 'GLR-2025-0313', ogrenciAd: 'Selin Kara' },
-  // TMGD
-  { id: 14, subeId: 16, kategori: 'kurs_ucreti',   tarih: '2025-03-11', tutar: 6000,  odemeYontemi: 'banka', aciklama: 'TMGD Temel kurs ücreti',            belgeNo: 'GLR-2025-0314', ogrenciAd: 'Serkan Koç' },
-  // Kira geliri
-  { id: 16, subeId: 1,  kategori: 'kira_geliri',   tarih: '2025-03-01', tutar: 5500,  odemeYontemi: 'banka', aciklama: 'Şube derslik kiralama geliri',     belgeNo: 'GLR-2025-0316', ogrenciAd: '' },
-];
+const BASLANGIC_GELIRLER = [];
 
 const BOS_FORM = {
   subeId: '', kategori: 'kurs_ucreti', odemeYontemi: 'nakit',

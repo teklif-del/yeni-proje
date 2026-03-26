@@ -27,28 +27,7 @@ const FATURA_TIPLERI = ['Elektrik', 'Su', 'Doğalgaz', 'İnternet', 'Telefon', '
 const ARAC_TIPLERI = ['Yakıt', 'Bakım / Servis', 'Sigorta', 'Muayene', 'Trafik Cezası', 'Diğer'];
 
 // ─── BAŞLANGIÇ VERİSİ ──────────────────────────────────────
-const BASLANGIC_GIDERLER = [
-  { id: 1, subeId: 1, kategori: 'sgk',      altTip: '',          tarih: '2025-03-05', tutar: 12400, kdv: 0,    aciklama: 'Mart SGK işveren + işçi payı',   belgeNo: 'SGK-2025-03', durum: 'odendi' },
-  { id: 2, subeId: 1, kategori: 'vergi',    altTip: 'KDV',       tarih: '2025-03-25', tutar: 8750,  kdv: 0,    aciklama: 'Şubat dönemi KDV beyanı',        belgeNo: 'VRG-2025-02', durum: 'odendi' },
-  { id: 3, subeId: 1, kategori: 'vergi',    altTip: 'Muhtasar Beyanname', tarih: '2025-03-26', tutar: 3200, kdv: 0, aciklama: 'Şubat muhtasar',           belgeNo: 'MHT-2025-02', durum: 'bekliyor' },
-  { id: 4, subeId: 1, kategori: 'kira',     altTip: '',          tarih: '2025-03-01', tutar: 18500, kdv: 3330, aciklama: 'Mart ayı şube kirası',            belgeNo: 'FTR-2025-031', durum: 'odendi' },
-  { id: 5, subeId: 1, kategori: 'fatura',   altTip: 'Elektrik',  tarih: '2025-03-12', tutar: 2850,  kdv: 513,  aciklama: 'Şubat dönemi elektrik',          belgeNo: 'ELK-2025-02', durum: 'odendi' },
-  { id: 6, subeId: 1, kategori: 'fatura',   altTip: 'Su',        tarih: '2025-03-14', tutar: 480,   kdv: 86,   aciklama: 'Şubat su faturası',              belgeNo: 'SU-2025-02',  durum: 'odendi' },
-  { id: 7, subeId: 1, kategori: 'fatura',   altTip: 'Doğalgaz',  tarih: '2025-03-13', tutar: 1620,  kdv: 292,  aciklama: 'Şubat doğalgaz',                 belgeNo: 'GZ-2025-02',  durum: 'odendi' },
-  { id: 8, subeId: 1, kategori: 'fatura',   altTip: 'İnternet',  tarih: '2025-03-10', tutar: 850,   kdv: 153,  aciklama: 'Mart internet + telefon',        belgeNo: 'INT-2025-03', durum: 'odendi' },
-  { id: 9, subeId: 2, kategori: 'sgk',      altTip: '',          tarih: '2025-03-05', tutar: 9800,  kdv: 0,    aciklama: 'Mart SGK ödemesi',               belgeNo: 'SGK-2025-03', durum: 'odendi' },
-  { id: 10,subeId: 2, kategori: 'kira',     altTip: '',          tarih: '2025-03-01', tutar: 14000, kdv: 2520, aciklama: 'Mart kira',                      belgeNo: 'FTR-2025-032', durum: 'odendi' },
-  { id: 11,subeId: 2, kategori: 'arac',     altTip: 'Yakıt',     tarih: '2025-03-20', tutar: 3200,  kdv: 576,  aciklama: 'Mart yakıt gideri',              belgeNo: 'YKT-2025-03', durum: 'odendi' },
-  { id: 12,subeId: 2, kategori: 'arac',     altTip: 'Bakım / Servis', tarih: '2025-03-18', tutar: 4500, kdv: 810, aciklama: '34 AAA 001 periyodik bakım', belgeNo: 'SRV-2025-03', durum: 'odendi' },
-  { id: 13,subeId: 1, kategori: 'malzeme',  altTip: '',          tarih: '2025-03-08', tutar: 1200,  kdv: 216,  aciklama: 'Kırtasiye ve temizlik malzemesi',belgeNo: 'MLZ-2025-03', durum: 'odendi' },
-  { id: 14,subeId: 1, kategori: 'sigorta',  altTip: '',          tarih: '2025-03-01', tutar: 6800,  kdv: 0,    aciklama: 'Yıllık işyeri sigortası (aylık)',belgeNo: 'SGT-2025-01', durum: 'odendi' },
-  { id: 15,subeId: 3, kategori: 'vergi',    altTip: 'KDV',       tarih: '2025-03-25', tutar: 5400,  kdv: 0,    aciklama: 'Şubat KDV beyanı',               belgeNo: 'VRG-2025-03', durum: 'bekliyor' },
-  { id: 16,subeId: 1, kategori: 'muhasebe', altTip: '',          tarih: '2025-03-01', tutar: 3500,  kdv: 630,  aciklama: 'Mart mali müşavirlik ücreti',    belgeNo: 'MSV-2025-03', durum: 'odendi' },
-  { id: 17,subeId: 1, kategori: 'reklam',   altTip: '',          tarih: '2025-03-15', tutar: 5000,  kdv: 900,  aciklama: 'Sosyal medya reklam paketi',     belgeNo: 'RKL-2025-03', durum: 'odendi' },
-  { id: 18,subeId: 4, kategori: 'sgk',      altTip: '',          tarih: '2025-03-05', tutar: 7600,  kdv: 0,    aciklama: 'Mart SGK',                       belgeNo: 'SGK-2025-03', durum: 'odendi' },
-  { id: 19,subeId: 4, kategori: 'bakim',    altTip: '',          tarih: '2025-03-22', tutar: 2800,  kdv: 504,  aciklama: 'Klima bakım & bina onarım',      belgeNo: 'ORM-2025-03', durum: 'bekliyor' },
-  { id: 20,subeId: 5, kategori: 'fatura',   altTip: 'Elektrik',  tarih: '2025-03-12', tutar: 1950,  kdv: 351,  aciklama: 'Şubat elektrik',                 belgeNo: 'ELK-2025-05', durum: 'odendi' },
-];
+const BASLANGIC_GIDERLER = [];
 
 const AYLAR = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
 
