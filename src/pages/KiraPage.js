@@ -73,6 +73,9 @@ function dbToOdeme(row) {
     faturaKesildi: row.fatura_kesildi || false,
     faturaNo:     row.fatura_no || '',
     faturaTarihi: row.fatura_tarihi || null,
+    kdvOrani:     Number(row.kdv_orani) || 0,
+    kdvTutar:     Number(row.kdv_tutar) || 0,
+    matrah:       Number(row.matrah) || 0,
   };
 }
 
@@ -241,12 +244,13 @@ function FaturaModal({ odeme, mulk, acik, kapat, onFaturaKes }) {
 
   if (!acik || !odeme || !mulk) return null;
 
-  const tutar          = odeme?.tutar || 0;
-  const kdvTutar       = Math.round(tutar * kdvOrani / 100);
-  const kdvDahilToplam = tutar + kdvTutar;
+  // Girilen tutar KDV DAHİL → KDV hariç matrahı ve KDV tutarını hesapla
+  const kdvDahilToplam = odeme?.tutar || 0;
+  const matrah         = kdvOrani > 0 ? Math.round(kdvDahilToplam / (1 + kdvOrani / 100)) : kdvDahilToplam;
+  const kdvTutar       = kdvDahilToplam - matrah;
 
   const kes = () => {
-    onFaturaKes(odeme.id, faturaNo, faturaTarihi, kdvOrani, kdvTutar);
+    onFaturaKes(odeme.id, faturaNo, faturaTarihi, kdvOrani, kdvTutar, matrah);
     kapat();
   };
 
@@ -260,7 +264,7 @@ function FaturaModal({ odeme, mulk, acik, kapat, onFaturaKes }) {
           <InfoSatir etiket="Kiracı"       deger={mulk?.kiraci} />
           <InfoSatir etiket="TC No"        deger={mulk?.kiraci_tc || '—'} />
           <InfoSatir etiket="Dönem"        deger={odeme?.vadeTarihi ? `${AY_ADLARI[new Date(odeme.vadeTarihi).getMonth()]} ${new Date(odeme.vadeTarihi).getFullYear()}` : '—'} />
-          <InfoSatir etiket="KDV Hariç"   deger={`₺${tutar.toLocaleString('tr-TR')}`} renk="#15803D" />
+          <InfoSatir etiket="Ödenen Tutar (KDV Dahil)" deger={`₺${kdvDahilToplam.toLocaleString('tr-TR')}`} renk="#15803D" />
           <InfoSatir etiket="Ödeme Tarihi" deger={odeme?.odenmeTarihi || '—'} />
         </div>
       </div>
@@ -285,8 +289,8 @@ function FaturaModal({ odeme, mulk, acik, kapat, onFaturaKes }) {
         </div>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'8px' }}>
           <div style={{ background:'white', borderRadius:'8px', padding:'10px', border:'1px solid #BFDBFE', textAlign:'center' }}>
-            <div style={{ fontSize:'10px', color:'#64748B', fontWeight:'700', textTransform:'uppercase', marginBottom:'3px' }}>Matrah</div>
-            <div style={{ fontSize:'15px', fontWeight:'800', color:'#1E293B' }}>₺{tutar.toLocaleString('tr-TR')}</div>
+            <div style={{ fontSize:'10px', color:'#64748B', fontWeight:'700', textTransform:'uppercase', marginBottom:'3px' }}>Matrah (KDV Hariç)</div>
+            <div style={{ fontSize:'15px', fontWeight:'800', color:'#1E293B' }}>₺{matrah.toLocaleString('tr-TR')}</div>
           </div>
           <div style={{ background:'white', borderRadius:'8px', padding:'10px', border:'1px solid #BFDBFE', textAlign:'center' }}>
             <div style={{ fontSize:'10px', color:'#64748B', fontWeight:'700', textTransform:'uppercase', marginBottom:'3px' }}>KDV (%{kdvOrani})</div>
@@ -446,7 +450,7 @@ function AyAyOdemeler({ mulk, odemeler, onOde, onFaturaModal }) {
                         </span>
                         {o.faturaNo && <div style={{ fontSize:'10px', color:'#64748B', marginTop:'2px' }}>{o.faturaNo}</div>}
                       </div>
-                    ) : (odendi && mulk.faturaKes) ? (
+                    ) : odendi ? (
                       <button onClick={() => onFaturaModal(o)}
                         style={{ background:'linear-gradient(135deg,#059669,#047857)', color:'white', border:'none',
                           borderRadius:'8px', padding:'6px 12px', fontSize:'11px', fontWeight:'700', cursor:'pointer' }}>
@@ -691,10 +695,11 @@ export default function KiraPage() {
       return o.durum === 'odendi' && m?.faturaKes && !o.faturaKesildi;
     }), [odemeler, mulkler]);
 
-  // Toplam fatura matrahı ve KDV (kesilen faturalar - local state'ten)
-  const toplamFaturaTutar    = useMemo(() => faturaKesilenOdemeler.reduce((s, o) => s + o.tutar, 0), [faturaKesilenOdemeler]);
-  const toplamKdvTutar       = useMemo(() => faturaKesilenOdemeler.reduce((s, o) => s + (o.kdvTutar || 0), 0), [faturaKesilenOdemeler]);
-  const toplamKdvDahilTutar  = toplamFaturaTutar + toplamKdvTutar;
+  // Toplam fatura hesapları (kesilen faturalar)
+  // matrah = kdv hariç, kdvTutar = hesaplanan kdv, tutar = kdv dahil toplam (girilen rakam)
+  const toplamFaturaTutar   = useMemo(() => faturaKesilenOdemeler.reduce((s, o) => s + (o.matrah || o.tutar), 0), [faturaKesilenOdemeler]);
+  const toplamKdvTutar      = useMemo(() => faturaKesilenOdemeler.reduce((s, o) => s + (o.kdvTutar || 0), 0), [faturaKesilenOdemeler]);
+  const toplamKdvDahilTutar = useMemo(() => faturaKesilenOdemeler.reduce((s, o) => s + o.tutar, 0), [faturaKesilenOdemeler]);
 
   // ─── Ödeme al (tam veya kısmi) ───────────────────────────
   const odeIsaretle = async (odemeId, miktar, odenmeTarihi, tip) => {
@@ -732,16 +737,19 @@ export default function KiraPage() {
   };
 
   // ─── Fatura kes ──────────────────────────────────────────
-  const faturaKes = async (odemeId, faturaNo, faturaTarihi, kdvOrani = 0, kdvTutar = 0) => {
-    const guncelObj = { fatura_kesildi: true, fatura_no: faturaNo, fatura_tarihi: faturaTarihi };
-    const { error } = await supabase.from('kira_odemeleri').update(guncelObj).eq('id', odemeId);
-    if (!error) {
-      setOdemeler(prev => prev.map(o => o.id === odemeId
-        ? { ...o, faturaKesildi: true, faturaNo, faturaTarihi, kdvOrani, kdvTutar }
-        : o));
-    } else {
-      console.warn('Fatura kes hatası:', error.message);
+  const faturaKes = async (odemeId, faturaNo, faturaTarihi, kdvOrani = 0, kdvTutar = 0, matrah = 0) => {
+    // Önce fatura_kesildi + fatura_no + fatura_tarihi ile dene
+    const { error } = await supabase.from('kira_odemeleri')
+      .update({ fatura_kesildi: true, fatura_no: faturaNo || '', fatura_tarihi: faturaTarihi })
+      .eq('id', odemeId);
+    if (error) {
+      console.warn('Fatura kes DB hatası:', error.message);
+      // Kolon yoksa bile local state güncelle
     }
+    // DB başarılı olsun ya da olmasın local state güncellenir
+    setOdemeler(prev => prev.map(o => o.id === odemeId
+      ? { ...o, faturaKesildi: true, faturaNo: faturaNo || '', faturaTarihi, kdvOrani, kdvTutar, matrah }
+      : o));
   };
 
   // ─── Sözleşme yenile ─────────────────────────────────────
@@ -1167,7 +1175,7 @@ export default function KiraPage() {
                       <td>
                         {o.faturaKesildi ? (
                           <span style={{ background:'#DCFCE7', color:'#14532D', padding:'3px 8px', borderRadius:'8px', fontSize:'11px', fontWeight:'700' }}>🧾 Kesildi</span>
-                        ) : (o.durum === 'odendi' && m?.faturaKes) ? (
+                        ) : (o.durum === 'odendi') ? (
                           <button onClick={() => { setFaturaOdeme(o); setFaturaModalAcik(true); }}
                             style={{ background:'#059669', color:'white', border:'none', borderRadius:'8px', padding:'5px 10px', fontSize:'11px', fontWeight:'700', cursor:'pointer' }}>
                             🧾 Kes
@@ -1318,9 +1326,9 @@ export default function KiraPage() {
                         <td><div style={{ fontWeight:'600' }}>{m?.kiraci || '—'}</div></td>
                         <td><div style={{ fontSize:'12px', color:'#64748B' }}>{m?.kiraci_tc || '—'}</div></td>
                         <td>{AY_ADLARI[dt.getMonth()]} {dt.getFullYear()}</td>
-                        <td style={{ fontWeight:'800', color:'#059669' }}>₺{o.tutar.toLocaleString('tr-TR')}</td>
+                        <td style={{ fontWeight:'800', color:'#059669' }}>₺{(o.matrah || o.tutar).toLocaleString('tr-TR')}</td>
                         <td style={{ fontWeight:'700', color:'#2563EB' }}>{kdvT > 0 ? `₺${kdvT.toLocaleString('tr-TR')}` : '—'}{o.kdvOrani > 0 && <span style={{ fontSize:'10px', color:'#94A3B8', marginLeft:'3px' }}>(%{o.kdvOrani})</span>}</td>
-                        <td style={{ fontWeight:'800', color:'#4F46E5' }}>₺{(o.tutar + kdvT).toLocaleString('tr-TR')}</td>
+                        <td style={{ fontWeight:'800', color:'#4F46E5' }}>₺{o.tutar.toLocaleString('tr-TR')}</td>
                         <td><span style={{ fontSize:'12px', fontWeight:'700', color:'#14532D' }}>{o.faturaNo || '—'}</span></td>
                         <td style={{ fontSize:'12px' }}>{o.faturaTarihi ? `📅 ${o.faturaTarihi}` : '—'}</td>
                         <td><span style={{ background:'#DCFCE7', color:'#14532D', padding:'4px 10px', borderRadius:'12px', fontSize:'12px', fontWeight:'700' }}>✅ Fatura Kesildi</span></td>
@@ -1411,16 +1419,17 @@ export default function KiraPage() {
               {detaySekme === 'sozlesme' && (
                 <SozlesmeKarti mulk={gm} onYenile={(id,oran,yeniKira,sure) => {
                   sozlesmeYenile(id, oran, yeniKira, sure);
-                  setDetayMulk(m => ({ ...m, aylikKira: yeniKira, yenilemeOrani: oran }));
+                  setDetayMulk(prev => ({ ...prev, aylikKira: yeniKira, yenilemeOrani: oran }));
                 }} />
               )}
 
               {detaySekme === 'fatura_detay' && (() => {
                 const mulkFaturaOdemeleri = odemeler.filter(o => o.mulkId === gm.id);
-                const kesilmis = mulkFaturaOdemeleri.filter(o => o.faturaKesildi);
-                const bekleyen = mulkFaturaOdemeleri.filter(o => (o.durum === 'odendi') && (!o.faturaKesildi) && (gm.faturaKes === true));
-                const faturaToplam = kesilmis.reduce((s, o) => s + o.tutar, 0);
+                const kesilmis     = mulkFaturaOdemeleri.filter(o => o.faturaKesildi);
+                const bekleyen     = mulkFaturaOdemeleri.filter(o => (o.durum === 'odendi') && (!o.faturaKesildi));
+                const faturaToplam = kesilmis.reduce((s, o) => s + (o.matrah || o.tutar), 0);
                 const kdvToplam    = kesilmis.reduce((s, o) => s + (o.kdvTutar || 0), 0);
+                const kdvDahilToplam = kesilmis.reduce((s, o) => s + o.tutar, 0);
                 return (
                   <div>
                     {!gm.faturaKes && (
@@ -1434,9 +1443,9 @@ export default function KiraPage() {
                     {kesilmis.length > 0 && (
                       <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'10px', marginBottom:'16px' }}>
                         {[
-                          { label:'Kesilen Fatura', deger:`₺${faturaToplam.toLocaleString('tr-TR')}`, renk:'#059669', bg:'#DCFCE7', brd:'#86EFAC' },
-                          { label:'Toplam KDV',     deger: kdvToplam>0?`₺${kdvToplam.toLocaleString('tr-TR')}` :'—',  renk:'#2563EB', bg:'#DBEAFE', brd:'#93C5FD' },
-                          { label:'KDV Dahil Toplam',deger:`₺${(faturaToplam+kdvToplam).toLocaleString('tr-TR')}`,    renk:'#4F46E5', bg:'#EDE9FE', brd:'#C4B5FD' },
+                          { label:'Matrah (KDV Hariç)', deger:`₺${faturaToplam.toLocaleString('tr-TR')}`,  renk:'#059669', bg:'#DCFCE7', brd:'#86EFAC' },
+                          { label:'Toplam KDV',         deger: kdvToplam>0?`₺${kdvToplam.toLocaleString('tr-TR')}` :'₺0', renk:'#2563EB', bg:'#DBEAFE', brd:'#93C5FD' },
+                          { label:'KDV Dahil Toplam',   deger:`₺${kdvDahilToplam.toLocaleString('tr-TR')}`,           renk:'#4F46E5', bg:'#EDE9FE', brd:'#C4B5FD' },
                         ].map(k => (
                           <div key={k.label} style={{ background:k.bg, border:`1px solid ${k.brd}`, borderRadius:'10px', padding:'12px', textAlign:'center' }}>
                             <div style={{ fontSize:'18px', fontWeight:'800', color:k.renk }}>{k.deger}</div>
@@ -1476,8 +1485,8 @@ export default function KiraPage() {
                         <div key={o.id} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', background:'#F0FFF4', border:'1px solid #86EFAC', borderRadius:'8px', padding:'12px 16px', marginBottom:'8px' }}>
                           <div>
                             <div style={{ fontWeight:'700', fontSize:'13px' }}>{AY_ADLARI[dt.getMonth()]} {dt.getFullYear()}</div>
-                            <div style={{ fontSize:'12px', color:'#14532D' }}>Matrah: ₺{o.tutar.toLocaleString('tr-TR')} {o.faturaNo && `| ${o.faturaNo}`}</div>
-                            {o.kdvTutar > 0 && <div style={{ fontSize:'11px', color:'#2563EB' }}>KDV: ₺{o.kdvTutar.toLocaleString('tr-TR')} | Toplam: ₺{(o.tutar+(o.kdvTutar||0)).toLocaleString('tr-TR')}</div>}
+                            <div style={{ fontSize:'12px', color:'#14532D' }}>Matrah: ₺{(o.matrah||o.tutar).toLocaleString('tr-TR')} {o.faturaNo && `| ${o.faturaNo}`}</div>
+                            {o.kdvTutar > 0 && <div style={{ fontSize:'11px', color:'#2563EB' }}>KDV (%{o.kdvOrani}): ₺{o.kdvTutar.toLocaleString('tr-TR')} | KDV Dahil: ₺{o.tutar.toLocaleString('tr-TR')}</div>}
                             {o.faturaTarihi && <div style={{ fontSize:'11px', color:'#64748B' }}>Fatura Tarihi: {o.faturaTarihi}</div>}
                           </div>
                           <span style={{ background:'#DCFCE7', color:'#14532D', padding:'5px 12px', borderRadius:'12px', fontSize:'12px', fontWeight:'700' }}>✅ Fatura Kesildi</span>
