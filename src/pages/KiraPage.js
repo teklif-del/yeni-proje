@@ -35,28 +35,25 @@ function dbToMulk(row) {
   };
 }
 
-// Supabase'de hangi kolonlar var? Her ikisi de ALTER TABLE ile eklenmeli.
-// Eklenmediyse hâlâ çalışsın diye try/catch korunuyor.
 function mulkToDB(m) {
-  const obj = {
-    ad:                m.ad,
-    adres:             m.adres || '',
-    tip:               m.tip || 'daire',
-    kiraci:            m.kiraci || '',
-    kiraci_telefon:    m.kiraci_telefon || '',
-    kiraci_email:      m.kiraci_email || '',
-    aylik_kira:        Number(m.aylikKira) || 0,
-    depozito:          Number(m.depozito) || 0,
+  return {
+    ad:                 m.ad,
+    adres:              m.adres || '',
+    tip:                m.tip || 'daire',
+    kiraci:             m.kiraci || '',
+    kiraci_telefon:     m.kiraci_telefon || '',
+    kiraci_email:       m.kiraci_email || '',
+    aylik_kira:         Number(m.aylikKira) || 0,
+    depozito:           Number(m.depozito) || 0,
     sozlesme_baslangic: m.sozlesmeBaslangic || null,
-    sozlesme_bitis:    m.sozlesmeBitis || null,
-    yenileme_aktif:    Boolean(m.yenilemeAktif),
-    yenileme_orani:    Number(m.yenilemeOrani) || 20,
-    durum:             m.durum || 'aktif',
+    sozlesme_bitis:     m.sozlesmeBitis || null,
+    yenileme_aktif:     Boolean(m.yenilemeAktif),
+    yenileme_orani:     Number(m.yenilemeOrani) || 20,
+    durum:              m.durum || 'aktif',
+    // Supabase SQL çalıştırıldıysa aktif olur, yoksa ignore edilir
+    kiraci_tc:          m.kiraci_tc || '',
+    fatura_kes:         Boolean(m.faturaKes),
   };
-  // Bu kolonlar ALTER TABLE ile eklendikten sonra çalışır
-  if (m.kiraci_tc !== undefined) obj.kiraci_tc = m.kiraci_tc || '';
-  if (m.faturaKes !== undefined) obj.fatura_kes = Boolean(m.faturaKes);
-  return obj;
 }
 
 function dbToOdeme(row) {
@@ -767,8 +764,25 @@ export default function KiraPage() {
       }
       setDuzenle(null);
     } else {
-      const { data, error } = await supabase.from('kira_mulkleri').insert(mulkToDB(obj)).select().single();
-      if (!error && data) {
+      const dbObj = mulkToDB(obj);
+      const { data, error } = await supabase.from('kira_mulkleri').insert(dbObj).select().single();
+      if (error) {
+        // kiraci_tc veya fatura_kes kolonu yoksa bunları çıkarıp tekrar dene
+        const { kiraci_tc, fatura_kes, ...dbObjTemiz } = dbObj;
+        const { data: data2, error: error2 } = await supabase.from('kira_mulkleri').insert(dbObjTemiz).select().single();
+        if (error2) {
+          alert('Hata: ' + error2.message);
+          setKaydediliyor(false);
+          return;
+        }
+        const yeniMulk = dbToMulk(data2);
+        setMulkler(prev => [...prev, yeniMulk]);
+        const yeniSatirlar = odemelerUret(yeniMulk);
+        if (yeniSatirlar.length > 0) {
+          const { data: eklenen } = await supabase.from('kira_odemeleri').insert(yeniSatirlar).select();
+          if (eklenen) setOdemeler(prev => [...prev, ...eklenen.map(dbToOdeme)]);
+        }
+      } else if (data) {
         const yeniMulk = dbToMulk(data);
         setMulkler(prev => [...prev, yeniMulk]);
         const yeniSatirlar = odemelerUret(yeniMulk);
