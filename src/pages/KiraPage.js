@@ -104,9 +104,6 @@ const odemelerUret = (mulk) => {
       odeme_tarihi: null,
       aciklama:     '',
       durum,
-      fatura_kesildi: false,
-      fatura_no: '',
-      fatura_tarihi: null,
     });
     cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
   }
@@ -745,6 +742,19 @@ export default function KiraPage() {
       faturaKes:    Boolean(form.faturaKes),
     };
 
+    // Ödeme satırlarını DB'ye yazar, kolon yoksa temiz veri ile tekrar dener
+    const odemeInsert = async (satirlar) => {
+      if (!satirlar.length) return [];
+      const { data: d, error: e } = await supabase.from('kira_odemeleri').insert(satirlar).select();
+      if (e) {
+        console.warn('Ödeme insert hatası, basit veri ile tekrar deneniyor:', e.message);
+        const temiz = satirlar.map(({ fatura_kesildi, fatura_no, fatura_tarihi, ...rest }) => rest);
+        const { data: d2 } = await supabase.from('kira_odemeleri').insert(temiz).select();
+        return d2 || [];
+      }
+      return d || [];
+    };
+
     if (duzenleModal) {
       const { error } = await supabase.from('kira_mulkleri').update(mulkToDB(obj)).eq('id', duzenleModal.id);
       if (!error) {
@@ -752,45 +762,35 @@ export default function KiraPage() {
         setMulkler(prev => prev.map(m => m.id===duzenleModal.id ? guncel : m));
         await supabase.from('kira_odemeleri').delete().eq('mulk_id', duzenleModal.id);
         const yeniSatirlar = odemelerUret(guncel);
-        if (yeniSatirlar.length > 0) {
-          const { data: eklenen } = await supabase.from('kira_odemeleri').insert(yeniSatirlar).select();
-          setOdemeler(prev => [
-            ...prev.filter(o => o.mulkId !== duzenleModal.id),
-            ...(eklenen || []).map(dbToOdeme),
-          ]);
-        } else {
-          setOdemeler(prev => prev.filter(o => o.mulkId !== duzenleModal.id));
-        }
+        const eklenen = await odemeInsert(yeniSatirlar);
+        setOdemeler(prev => [
+          ...prev.filter(o => o.mulkId !== duzenleModal.id),
+          ...eklenen.map(dbToOdeme),
+        ]);
+      } else {
+        alert('Güncelleme hatası: ' + error.message);
       }
       setDuzenle(null);
     } else {
+      // Önce mülkü ekle
       const dbObj = mulkToDB(obj);
+      let mulkData = null;
       const { data, error } = await supabase.from('kira_mulkleri').insert(dbObj).select().single();
       if (error) {
-        // kiraci_tc veya fatura_kes kolonu yoksa bunları çıkarıp tekrar dene
+        // Yeni kolonlar yoksa çıkarıp tekrar dene
         const { kiraci_tc, fatura_kes, ...dbObjTemiz } = dbObj;
         const { data: data2, error: error2 } = await supabase.from('kira_mulkleri').insert(dbObjTemiz).select().single();
-        if (error2) {
-          alert('Hata: ' + error2.message);
-          setKaydediliyor(false);
-          return;
-        }
-        const yeniMulk = dbToMulk(data2);
-        setMulkler(prev => [...prev, yeniMulk]);
-        const yeniSatirlar = odemelerUret(yeniMulk);
-        if (yeniSatirlar.length > 0) {
-          const { data: eklenen } = await supabase.from('kira_odemeleri').insert(yeniSatirlar).select();
-          if (eklenen) setOdemeler(prev => [...prev, ...eklenen.map(dbToOdeme)]);
-        }
-      } else if (data) {
-        const yeniMulk = dbToMulk(data);
-        setMulkler(prev => [...prev, yeniMulk]);
-        const yeniSatirlar = odemelerUret(yeniMulk);
-        if (yeniSatirlar.length > 0) {
-          const { data: eklenen } = await supabase.from('kira_odemeleri').insert(yeniSatirlar).select();
-          if (eklenen) setOdemeler(prev => [...prev, ...eklenen.map(dbToOdeme)]);
-        }
+        if (error2) { alert('Mülk eklenemedi: ' + error2.message); setKaydediliyor(false); return; }
+        mulkData = data2;
+      } else {
+        mulkData = data;
       }
+      const yeniMulk = dbToMulk(mulkData);
+      setMulkler(prev => [...prev, yeniMulk]);
+      // Ödemeleri ekle
+      const yeniSatirlar = odemelerUret(yeniMulk);
+      const eklenen = await odemeInsert(yeniSatirlar);
+      if (eklenen.length > 0) setOdemeler(prev => [...prev, ...eklenen.map(dbToOdeme)]);
       setYeniModal(false);
     }
     setForm(BOSFORM);
