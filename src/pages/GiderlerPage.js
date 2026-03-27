@@ -33,8 +33,27 @@ const AYLAR = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağus
 
 const BOSfORM = {
   subeId: '', kategori: '', altTip: '', tarih: new Date().toISOString().split('T')[0],
-  tutar: '', kdv: '', aciklama: '', belgeNo: '', durum: 'odendi', tekrar: 'tek_sefer',
+  tutar: '', kdvOrani: '20', aciklama: '', belgeNo: '', durum: 'odendi', tekrar: 'tek_sefer',
 };
+
+// ─── Input yardımcısı (bileşen DIŞINDA — focus sorunu önlenir) ──
+function GiderInp({ label, name, tip='text', options, tam, zorunlu, form, setForm }) {
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:'5px', gridColumn: tam ? '1/-1' : undefined }}>
+      <label style={{ fontSize:'12px', fontWeight:'600', color:'#374151' }}>{label}{zorunlu && <span style={{color:'#EF4444'}}> *</span>}</label>
+      {options ? (
+        <select style={{ padding:'9px 12px', border:'1.5px solid #E2E8F0', borderRadius:'8px', fontSize:'14px', outline:'none', background:'white' }}
+          value={form[name] || ''} onChange={e => setForm(p => ({ ...p, [name]: e.target.value }))}>
+          <option value="">Seçin...</option>
+          {options.map(o => <option key={o.value ?? o} value={o.value ?? o}>{o.label ?? o}</option>)}
+        </select>
+      ) : (
+        <input style={{ padding:'9px 12px', border:'1.5px solid #E2E8F0', borderRadius:'8px', fontSize:'14px', outline:'none' }}
+          type={tip} value={form[name] || ''} onChange={e => setForm(p => ({ ...p, [name]: e.target.value }))} placeholder={label} />
+      )}
+    </div>
+  );
+}
 
 // ─── InfoSatir ─────────────────────────────────────────────
 function InfoSatir({ etiket, deger, renk }) {
@@ -64,14 +83,20 @@ export default function GiderlerPage() {
   const [silOnay, setSilOnay]        = useState(null);
   const [form, setForm]              = useState(BOSfORM);
 
-  // ── Supabase'den şube & şirket yükle ──
+  // ── Supabase'den giderler + şube & şirket yükle ──
   useEffect(() => {
     async function yukle() {
       setYukleniyor(true);
-      const [{ data: sd }, { data: srd }] = await Promise.all([
+      const [{ data: gd }, { data: sd }, { data: srd }] = await Promise.all([
+        supabase.from('giderler').select('*').order('tarih', { ascending: false }),
         supabase.from('subeler').select('*').order('id'),
         supabase.from('sirketler').select('*').order('id'),
       ]);
+      setGiderler((gd || []).map(r => ({
+        id: r.id, subeId: r.sube_id, kategori: r.kategori, altTip: r.alt_tip || '',
+        tarih: r.tarih, tutar: Number(r.tutar) || 0, kdv: Number(r.kdv) || 0,
+        aciklama: r.aciklama || '', belgeNo: r.belge_no || '', durum: r.durum || 'odendi',
+      })));
       setSubeler(sd || []);
       setSirketler(srd || []);
       setYukleniyor(false);
@@ -92,9 +117,10 @@ export default function GiderlerPage() {
   }), [giderler, katFiltre, subeFiltre, durumFiltre, aramaMetni]);
 
   // ── özet hesaplar ──
-  const toplamTutar   = giderler.reduce((s, g) => s + g.tutar, 0);
+  // tutar = KDV dahil toplam (girilen rakam), kdv = hesaplanan kdv tutarı
+  const toplamBrut    = giderler.reduce((s, g) => s + (g.tutar || 0), 0);
   const toplamKdv     = giderler.reduce((s, g) => s + (g.kdv || 0), 0);
-  const toplamBrut    = toplamTutar + toplamKdv;
+  const toplamTutar   = toplamBrut - toplamKdv; // KDV hariç (matrah)
   const bekleyenTutar = giderler.filter(g => g.durum === 'bekliyor').reduce((s, g) => s + g.tutar, 0);
 
   // ── grafik: kategori dağılımı ──
@@ -110,23 +136,64 @@ export default function GiderlerPage() {
     tutar: giderler.filter(g => new Date(g.tarih).getMonth() === i).reduce((s, g) => s + g.tutar, 0),
   })), [giderler]);
 
-  // ── kaydet ──
-  const kaydet = () => {
+  // ── kaydet (Supabase'e yazar) ──
+  const kaydet = async () => {
     if (!form.kategori || !form.tutar || !form.tarih) { alert('Kategori, tutar ve tarih zorunludur!'); return; }
-    const obj = { ...form, subeId: parseInt(form.subeId) || null, tutar: parseFloat(form.tutar) || 0, kdv: parseFloat(form.kdv) || 0 };
+    // Girilen tutar KDV DAHİL → matrah ve kdv hesapla
+    const kdvDahil  = parseFloat(form.tutar) || 0;
+    const kdvOrani  = parseFloat(form.kdvOrani) || 0;
+    const matrah    = kdvOrani > 0 ? Math.round(kdvDahil / (1 + kdvOrani / 100)) : kdvDahil;
+    const kdvTutar  = kdvDahil - matrah;
+    const row = {
+      sube_id:   parseInt(form.subeId) || null,
+      kategori:  form.kategori,
+      alt_tip:   form.altTip || '',
+      tarih:     form.tarih,
+      tutar:     kdvDahil,        // KDV dahil tutar
+      kdv:       kdvTutar,        // hesaplanan KDV
+      aciklama:  form.aciklama || '',
+      belge_no:  form.belgeNo || '',
+      durum:     form.durum || 'odendi',
+    };
     if (duzenleModal) {
-      setGiderler(prev => prev.map(g => g.id === duzenleModal.id ? { ...g, ...obj } : g));
+      const { error } = await supabase.from('giderler').update(row).eq('id', duzenleModal.id);
+      if (!error) {
+        setGiderler(prev => prev.map(g => g.id === duzenleModal.id
+          ? { ...g, subeId: row.sube_id, kategori: row.kategori, altTip: row.alt_tip,
+              tarih: row.tarih, tutar: row.tutar, kdv: row.kdv,
+              aciklama: row.aciklama, belgeNo: row.belge_no, durum: row.durum }
+          : g));
+      } else { alert('Güncelleme hatası: ' + error.message); }
       setDuzenle(null);
     } else {
-      setGiderler(prev => [{ ...obj, id: Date.now() }, ...prev]);
+      const { data, error } = await supabase.from('giderler').insert(row).select().single();
+      if (!error && data) {
+        setGiderler(prev => [{
+          id: data.id, subeId: data.sube_id, kategori: data.kategori, altTip: data.alt_tip,
+          tarih: data.tarih, tutar: data.tutar, kdv: data.kdv,
+          aciklama: data.aciklama, belgeNo: data.belge_no, durum: data.durum,
+        }, ...prev]);
+      } else { alert('Gider eklenemedi: ' + (error?.message || '')); }
       setYeniModal(false);
     }
     setForm(BOSfORM);
   };
 
-  const sil = id => { setGiderler(prev => prev.filter(g => g.id !== id)); setSilOnay(null); setDetay(null); };
-  const acDuzenle = g => { setForm({ ...g, subeId: g.subeId?.toString(), tutar: g.tutar?.toString(), kdv: g.kdv?.toString() }); setDuzenle(g); };
-  const odendi = id => setGiderler(prev => prev.map(g => g.id === id ? { ...g, durum: 'odendi' } : g));
+  const sil = async id => {
+    const { error } = await supabase.from('giderler').delete().eq('id', id);
+    if (!error) setGiderler(prev => prev.filter(g => g.id !== id));
+    setSilOnay(null); setDetay(null);
+  };
+  const acDuzenle = g => {
+    // KDV dahil tutardan oranı geri hesapla
+    const kdvOrani = g.kdv > 0 && g.tutar > 0 ? Math.round((g.kdv / g.tutar) * 100 / (1 - g.kdv / g.tutar)) : 0;
+    setForm({ ...g, subeId: g.subeId?.toString(), tutar: g.tutar?.toString(), kdvOrani: kdvOrani.toString(), belgeNo: g.belgeNo || '' });
+    setDuzenle(g);
+  };
+  const odendi = async id => {
+    await supabase.from('giderler').update({ durum: 'odendi' }).eq('id', id);
+    setGiderler(prev => prev.map(g => g.id === id ? { ...g, durum: 'odendi' } : g));
+  };
 
   // ── altTip listesi ──
   const altTipler = useMemo(() => {
@@ -136,22 +203,11 @@ export default function GiderlerPage() {
     return [];
   }, [form.kategori]);
 
-  // ── input yardımcısı ──
-  const Inp = ({ label, name, tip='text', options, tam, zorunlu }) => (
-    <div style={{ display:'flex', flexDirection:'column', gap:'5px', gridColumn: tam ? '1/-1' : undefined }}>
-      <label style={{ fontSize:'12px', fontWeight:'600', color:'#374151' }}>{label}{zorunlu && <span style={{color:'#EF4444'}}> *</span>}</label>
-      {options ? (
-        <select className="secim-input" style={{ padding:'9px 12px' }}
-          value={form[name] || ''} onChange={e => setForm(p => ({ ...p, [name]: e.target.value }))}>
-          <option value="">Seçin...</option>
-          {options.map(o => <option key={o.value ?? o} value={o.value ?? o}>{o.label ?? o}</option>)}
-        </select>
-      ) : (
-        <input className="arama-input" style={{ minWidth:0 }} type={tip}
-          value={form[name] || ''} onChange={e => setForm(p => ({ ...p, [name]: e.target.value }))} placeholder={label} />
-      )}
-    </div>
-  );
+  // KDV hesabı (anlık)
+  const kdvDahilTutar = parseFloat(form.tutar) || 0;
+  const kdvOraniVal   = parseFloat(form.kdvOrani) || 0;
+  const matrahHesap   = kdvOraniVal > 0 ? Math.round(kdvDahilTutar / (1 + kdvOraniVal / 100)) : kdvDahilTutar;
+  const kdvTutarHesap = kdvDahilTutar - matrahHesap;
 
   const tabs = [
     { id:'liste',     label:'📋 Gider Listesi' },
@@ -170,9 +226,9 @@ export default function GiderlerPage() {
       {/* ── Özet Kartlar ── */}
       <div className="ozet-kartlar">
         {[
-          { ikon:'💸', label:'Toplam Gider (KDV Hariç)',  deger:`₺${toplamTutar.toLocaleString('tr-TR')}`,  bg:'#FEE2E2', renk:'#EF4444' },
+          { ikon:'📊', label:'Toplam Gider (KDV Dahil)',  deger:`₺${toplamBrut.toLocaleString('tr-TR')}`,  bg:'#FEE2E2', renk:'#EF4444' },
           { ikon:'🧾', label:'KDV Toplamı',               deger:`₺${toplamKdv.toLocaleString('tr-TR')}`,    bg:'#FEF9C3', renk:'#F59E0B' },
-          { ikon:'📊', label:'Toplam (KDV Dahil)',         deger:`₺${toplamBrut.toLocaleString('tr-TR')}`,   bg:'#DBEAFE', renk:'#3B82F6' },
+          { ikon:'💸', label:'Toplam (KDV Hariç)',         deger:`₺${toplamTutar.toLocaleString('tr-TR')}`,   bg:'#DBEAFE', renk:'#3B82F6' },
           { ikon:'⏳', label:'Bekleyen Ödemeler',          deger:`₺${bekleyenTutar.toLocaleString('tr-TR')}`, bg:'#EDE9FE', renk:'#8B5CF6' },
           { ikon:'📂', label:'Toplam Kayıt',               deger:giderler.length,                             bg:'#DCFCE7', renk:'#10B981' },
           { ikon:'🏛️', label:'SGK + Vergi Toplam',          deger:`₺${giderler.filter(g=>['sgk','vergi'].includes(g.kategori)).reduce((s,g)=>s+g.tutar,0).toLocaleString('tr-TR')}`, bg:'#CFFAFE', renk:'#06B6D4' },
@@ -560,31 +616,63 @@ export default function GiderlerPage() {
             </div>
 
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
-              <Inp label="Şube" name="subeId" zorunlu options={subeler.map(s => { const sr = sirketler.find(x=>x.id===s.sirket_id); return { value: s.id, label: `${sr?.ikon||'🏢'} ${s.ad||s.ilce||''}` }; })} />
+              <GiderInp label="Şube" name="subeId" zorunlu form={form} setForm={setForm} options={subeler.map(s => { const sr = sirketler.find(x=>x.id===s.sirket_id); return { value: s.id, label: `${sr?.ikon||'🏢'} ${s.ad||s.ilce||''}` }; })} />
               {altTipler.length > 0
-                ? <Inp label="Alt Tip" name="altTip" options={altTipler.map(t => ({ value: t, label: t }))} />
-                : <Inp label="Alt Tip / Açıklama" name="altTip" />
+                ? <GiderInp label="Alt Tip" name="altTip" form={form} setForm={setForm} options={altTipler.map(t => ({ value: t, label: t }))} />
+                : <GiderInp label="Alt Tip / Açıklama" name="altTip" form={form} setForm={setForm} />
               }
-              <Inp label="Tarih *" name="tarih" tip="date" zorunlu />
-              <Inp label="Belge / Fatura No" name="belgeNo" />
-              <Inp label="Tutar (KDV Hariç) ₺ *" name="tutar" tip="number" zorunlu />
-              <Inp label="KDV Tutarı ₺" name="kdv" tip="number" />
-              {(form.tutar || form.kdv) && (
-                <div style={{ gridColumn:'1/-1', background:'#F0FDF4', borderRadius:'8px', padding:'12px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                  <span style={{ fontSize:'13px', color:'#064E3B' }}>KDV Dahil Toplam</span>
-                  <span style={{ fontSize:'18px', fontWeight:'700', color:'#EF4444' }}>
-                    ₺{((parseFloat(form.tutar)||0) + (parseFloat(form.kdv)||0)).toLocaleString('tr-TR')}
-                  </span>
+              <GiderInp label="Tarih" name="tarih" tip="date" zorunlu form={form} setForm={setForm} />
+              <GiderInp label="Belge / Fatura No" name="belgeNo" form={form} setForm={setForm} />
+
+              {/* KDV DAHİL tutar + oran → matrah otomatik hesaplanır */}
+              <GiderInp label="Tutar (KDV Dahil) ₺ *" name="tutar" tip="number" zorunlu form={form} setForm={setForm} />
+              <div style={{ display:'flex', flexDirection:'column', gap:'5px' }}>
+                <label style={{ fontSize:'12px', fontWeight:'600', color:'#374151' }}>KDV Oranı (%)</label>
+                <div style={{ display:'flex', gap:'6px', alignItems:'center' }}>
+                  {[0,10,20].map(o => (
+                    <button key={o} type="button"
+                      onClick={() => setForm(p => ({ ...p, kdvOrani: o.toString() }))}
+                      style={{ padding:'7px 14px', borderRadius:'8px', border:'1.5px solid', fontSize:'13px', fontWeight:'700', cursor:'pointer',
+                        background: String(form.kdvOrani)===String(o) ? '#3B82F6' : 'white',
+                        borderColor: String(form.kdvOrani)===String(o) ? '#3B82F6' : '#CBD5E1',
+                        color: String(form.kdvOrani)===String(o) ? 'white' : '#374151' }}>
+                      %{o}
+                    </button>
+                  ))}
+                  <input type="number" min="0" max="100" value={form.kdvOrani || ''}
+                    onChange={e => setForm(p => ({ ...p, kdvOrani: e.target.value }))}
+                    style={{ width:'60px', padding:'7px 8px', border:'1.5px solid #CBD5E1', borderRadius:'8px', fontSize:'13px', textAlign:'center', outline:'none' }} />
+                </div>
+              </div>
+
+              {kdvDahilTutar > 0 && (
+                <div style={{ gridColumn:'1/-1', background:'linear-gradient(135deg,#EFF6FF,#DBEAFE)', borderRadius:'10px', padding:'14px 16px', border:'1.5px solid #93C5FD' }}>
+                  <div style={{ fontSize:'12px', fontWeight:'700', color:'#1D4ED8', marginBottom:'10px' }}>🔢 KDV Hesabı</div>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'8px' }}>
+                    <div style={{ background:'white', borderRadius:'8px', padding:'10px', border:'1px solid #BFDBFE', textAlign:'center' }}>
+                      <div style={{ fontSize:'10px', color:'#64748B', fontWeight:'700', textTransform:'uppercase', marginBottom:'3px' }}>Matrah (KDV Hariç)</div>
+                      <div style={{ fontSize:'16px', fontWeight:'800', color:'#1E293B' }}>₺{matrahHesap.toLocaleString('tr-TR')}</div>
+                    </div>
+                    <div style={{ background:'white', borderRadius:'8px', padding:'10px', border:'1px solid #BFDBFE', textAlign:'center' }}>
+                      <div style={{ fontSize:'10px', color:'#64748B', fontWeight:'700', textTransform:'uppercase', marginBottom:'3px' }}>KDV (%{kdvOraniVal})</div>
+                      <div style={{ fontSize:'16px', fontWeight:'800', color:'#2563EB' }}>₺{kdvTutarHesap.toLocaleString('tr-TR')}</div>
+                    </div>
+                    <div style={{ background:'linear-gradient(135deg,#1D4ED8,#1E40AF)', borderRadius:'8px', padding:'10px', textAlign:'center' }}>
+                      <div style={{ fontSize:'10px', color:'#BFDBFE', fontWeight:'700', textTransform:'uppercase', marginBottom:'3px' }}>KDV Dahil</div>
+                      <div style={{ fontSize:'16px', fontWeight:'800', color:'white' }}>₺{kdvDahilTutar.toLocaleString('tr-TR')}</div>
+                    </div>
+                  </div>
                 </div>
               )}
-              <Inp label="Ödeme Durumu" name="durum" options={[{value:'odendi',label:'✅ Ödendi'},{value:'bekliyor',label:'⏳ Bekliyor'}]} />
-              <Inp label="Tekrar" name="tekrar" options={[
+
+              <GiderInp label="Ödeme Durumu" name="durum" form={form} setForm={setForm} options={[{value:'odendi',label:'✅ Ödendi'},{value:'bekliyor',label:'⏳ Bekliyor'}]} />
+              <GiderInp label="Tekrar" name="tekrar" form={form} setForm={setForm} options={[
                 {value:'tek_sefer',label:'Tek Seferlik'},
                 {value:'aylik',label:'Aylık Tekrar'},
                 {value:'3_aylik',label:'3 Aylık'},
                 {value:'yillik',label:'Yıllık'},
               ]} />
-              <Inp label="Açıklama / Not" name="aciklama" tam />
+              <GiderInp label="Açıklama / Not" name="aciklama" tam form={form} setForm={setForm} />
             </div>
 
             <div style={{ display:'flex', gap:'8px', marginTop:'20px', justifyContent:'flex-end' }}>

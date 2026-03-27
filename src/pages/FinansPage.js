@@ -29,9 +29,11 @@ function FinansPage() {
     yukle();
   }, []);
 
-  const toplamGelir = gelirler.reduce((sum, g) => sum + g.tutar, 0);
-  const toplamGider = giderler.reduce((sum, g) => sum + g.tutar, 0);
-  const netKar = toplamGelir - toplamGider;
+  const toplamGelir      = gelirler.reduce((sum, g) => sum + (g.tutar || 0), 0);
+  const toplamGiderBrut  = giderler.reduce((sum, g) => sum + (g.tutar || 0), 0); // KDV dahil
+  const toplamGiderKdv   = giderler.reduce((sum, g) => sum + (g.kdv || 0), 0);
+  const toplamGider      = toplamGiderBrut; // grafiklerde KDV dahil kullan
+  const netKar           = toplamGelir - toplamGiderBrut;
 
   // Aylık gelir/gider (son 6 ay)
   const bugun = new Date();
@@ -70,9 +72,10 @@ function FinansPage() {
       {/* Özet Kartlar */}
       <div className="ozet-kartlar" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
         {[
-          { ikon: '💚', label: 'Toplam Gelir', deger: toplamGelir, bg: '#DCFCE7', renk: '#10B981', format: true },
-          { ikon: '🔴', label: 'Toplam Gider', deger: toplamGider, bg: '#FEE2E2', renk: '#EF4444', format: true },
-          { ikon: '📊', label: 'Net Kar', deger: netKar, bg: '#DBEAFE', renk: '#3B82F6', format: true },
+          { ikon: '💚', label: 'Toplam Gelir',        deger: toplamGelir,     bg: '#DCFCE7', renk: '#10B981', format: true },
+          { ikon: '🔴', label: 'Toplam Gider (KDV Dahil)', deger: toplamGiderBrut, bg: '#FEE2E2', renk: '#EF4444', format: true },
+          { ikon: '🧾', label: 'Gider KDV Toplamı',   deger: toplamGiderKdv,  bg: '#FEF9C3', renk: '#F59E0B', format: true },
+          { ikon: '📊', label: 'Net Kar',              deger: netKar,          bg: netKar >= 0 ? '#DCFCE7' : '#FEE2E2', renk: netKar >= 0 ? '#10B981' : '#EF4444', format: true },
           { ikon: '📈', label: 'Kar Marjı', deger: toplamGelir > 0 ? `%${Math.round((netKar / toplamGelir) * 100)}` : '—', bg: '#EDE9FE', renk: '#8B5CF6', format: false },
         ].map(k => (
           <div key={k.label} className="ozet-kart">
