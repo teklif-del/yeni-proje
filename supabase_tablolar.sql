@@ -136,6 +136,7 @@ CREATE TABLE IF NOT EXISTS kira_mulkleri (
   adres               TEXT DEFAULT '',
   tip                 TEXT DEFAULT 'daire',   -- ofis / dukkan / depo / daire / arsa / fabrika / diger
   kiraci              TEXT DEFAULT '',
+  kiraci_tc           TEXT DEFAULT '',        -- Kiracı TC kimlik no (opsiyonel)
   kiraci_telefon      TEXT DEFAULT '',
   kiraci_email        TEXT DEFAULT '',
   aylik_kira          NUMERIC(12,2) DEFAULT 0,
@@ -144,8 +145,13 @@ CREATE TABLE IF NOT EXISTS kira_mulkleri (
   sozlesme_bitis      DATE DEFAULT NULL,
   yenileme_aktif      BOOLEAN DEFAULT FALSE,
   yenileme_orani      NUMERIC(5,2) DEFAULT 20,
-  durum               TEXT DEFAULT 'aktif'    -- aktif / bos
+  durum               TEXT DEFAULT 'aktif',   -- aktif / bos
+  fatura_kes          BOOLEAN DEFAULT FALSE   -- Ödeme alındığında fatura listesine düşsün mü?
 );
+
+-- Mevcut kira_mulkleri tablosuna eksik kolonları ekle (tablo zaten varsa)
+ALTER TABLE kira_mulkleri ADD COLUMN IF NOT EXISTS kiraci_tc    TEXT DEFAULT '';
+ALTER TABLE kira_mulkleri ADD COLUMN IF NOT EXISTS fatura_kes   BOOLEAN DEFAULT FALSE;
 
 
 -- ─── 10. KİRA ÖDEMELERİ ─────────────────────────────────────
@@ -157,32 +163,61 @@ CREATE TABLE IF NOT EXISTS kira_odemeleri (
   odenen_tutar    NUMERIC(12,2) DEFAULT 0,
   odeme_tarihi    DATE DEFAULT NULL,
   aciklama        TEXT DEFAULT '',
-  durum           TEXT DEFAULT 'bekliyor'   -- odendi / gecikme / bekliyor
+  durum           TEXT DEFAULT 'bekliyor',  -- odendi / gecikme / bekliyor
+  fatura_kesildi  BOOLEAN DEFAULT FALSE,
+  fatura_no       TEXT DEFAULT '',
+  fatura_tarihi   DATE DEFAULT NULL,
+  kdv_orani       NUMERIC(5,2) DEFAULT 0,
+  kdv_tutar       NUMERIC(12,2) DEFAULT 0,
+  matrah          NUMERIC(12,2) DEFAULT 0
+);
+
+-- Mevcut kira_odemeleri tablosuna eksik kolonları ekle (tablo zaten varsa)
+ALTER TABLE kira_odemeleri ADD COLUMN IF NOT EXISTS fatura_kesildi  BOOLEAN DEFAULT FALSE;
+ALTER TABLE kira_odemeleri ADD COLUMN IF NOT EXISTS fatura_no       TEXT DEFAULT '';
+ALTER TABLE kira_odemeleri ADD COLUMN IF NOT EXISTS fatura_tarihi   DATE DEFAULT NULL;
+ALTER TABLE kira_odemeleri ADD COLUMN IF NOT EXISTS kdv_orani       NUMERIC(5,2) DEFAULT 0;
+ALTER TABLE kira_odemeleri ADD COLUMN IF NOT EXISTS kdv_tutar       NUMERIC(12,2) DEFAULT 0;
+ALTER TABLE kira_odemeleri ADD COLUMN IF NOT EXISTS matrah          NUMERIC(12,2) DEFAULT 0;
+
+
+-- ─── 11. KİRA GİDERLERİ ──────────────────────────────────────
+CREATE TABLE IF NOT EXISTS kira_giderler (
+  id        SERIAL PRIMARY KEY,
+  mulk_id   INTEGER REFERENCES kira_mulkleri(id) ON DELETE SET NULL,  -- NULL = genel gider
+  tarih     DATE NOT NULL DEFAULT CURRENT_DATE,
+  tutar     NUMERIC(12,2) DEFAULT 0,
+  kategori  TEXT DEFAULT 'Diğer',   -- Bakım/Onarım, Vergi, Sigorta, Yönetim Komisyonu, vb.
+  aciklama  TEXT DEFAULT ''
 );
 
 
 -- ─── ROW LEVEL SECURITY (isteğe bağlı — geliştirme için kapat) ───
 -- Eğer RLS aktifse ve hata alıyorsan aşağıdaki satırları çalıştır:
--- ALTER TABLE sirketler   DISABLE ROW LEVEL SECURITY;
--- ALTER TABLE subeler     DISABLE ROW LEVEL SECURITY;
--- ALTER TABLE ogrenciler  DISABLE ROW LEVEL SECURITY;
--- ALTER TABLE gelirler    DISABLE ROW LEVEL SECURITY;
--- ALTER TABLE giderler    DISABLE ROW LEVEL SECURITY;
--- ALTER TABLE personel    DISABLE ROW LEVEL SECURITY;
--- ALTER TABLE araclar     DISABLE ROW LEVEL SECURITY;
--- ALTER TABLE arac_giderler DISABLE ROW LEVEL SECURITY;
+-- ALTER TABLE sirketler      DISABLE ROW LEVEL SECURITY;
+-- ALTER TABLE subeler        DISABLE ROW LEVEL SECURITY;
+-- ALTER TABLE ogrenciler     DISABLE ROW LEVEL SECURITY;
+-- ALTER TABLE gelirler       DISABLE ROW LEVEL SECURITY;
+-- ALTER TABLE giderler       DISABLE ROW LEVEL SECURITY;
+-- ALTER TABLE personel       DISABLE ROW LEVEL SECURITY;
+-- ALTER TABLE araclar        DISABLE ROW LEVEL SECURITY;
+-- ALTER TABLE arac_giderler  DISABLE ROW LEVEL SECURITY;
+-- ALTER TABLE kira_mulkleri  DISABLE ROW LEVEL SECURITY;
+-- ALTER TABLE kira_odemeleri DISABLE ROW LEVEL SECURITY;
+-- ALTER TABLE kira_giderler  DISABLE ROW LEVEL SECURITY;
 
 
 -- ─── YETKİLENDİRME (anon key ile okuma/yazma için) ───────────
-GRANT ALL ON sirketler    TO anon, authenticated;
-GRANT ALL ON subeler      TO anon, authenticated;
-GRANT ALL ON ogrenciler   TO anon, authenticated;
-GRANT ALL ON gelirler     TO anon, authenticated;
-GRANT ALL ON giderler     TO anon, authenticated;
-GRANT ALL ON personel     TO anon, authenticated;
-GRANT ALL ON araclar      TO anon, authenticated;
+GRANT ALL ON sirketler     TO anon, authenticated;
+GRANT ALL ON subeler       TO anon, authenticated;
+GRANT ALL ON ogrenciler    TO anon, authenticated;
+GRANT ALL ON gelirler      TO anon, authenticated;
+GRANT ALL ON giderler      TO anon, authenticated;
+GRANT ALL ON personel      TO anon, authenticated;
+GRANT ALL ON araclar       TO anon, authenticated;
 GRANT ALL ON arac_giderler TO anon, authenticated;
 GRANT ALL ON kira_mulkleri TO anon, authenticated;
 GRANT ALL ON kira_odemeleri TO anon, authenticated;
+GRANT ALL ON kira_giderler TO anon, authenticated;
 
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;

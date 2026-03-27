@@ -668,19 +668,30 @@ export default function KiraPage() {
   const [giderSilOnay, setGiderSilOnay]   = useState(null);
   const [giderForm, setGiderForm]         = useState({ mulkId:'', tarih: new Date().toISOString().split('T')[0], tutar:'', kategori:'Bakım/Onarım', aciklama:'' });
   const [giderKaydediyor, setGiderKaydediyor] = useState(false);
+  const [giderTabloYok, setGiderTabloYok] = useState(false);
 
   // ─── Veri Yükle ──────────────────────────────────────────
   useEffect(() => {
     async function yukle() {
       setYukleniyor(true);
-      const [{ data: md }, { data: od }, { data: gd }] = await Promise.all([
+      const [{ data: md }, { data: od }] = await Promise.all([
         supabase.from('kira_mulkleri').select('*').order('id'),
         supabase.from('kira_odemeleri').select('*').order('vade_tarihi', { ascending: false }),
-        supabase.from('kira_giderler').select('*').order('tarih', { ascending: false }),
       ]);
       setMulkler((md || []).map(dbToMulk));
       setOdemeler((od || []).map(dbToOdeme));
-      setGiderler((gd || []).map(dbToGider));
+
+      // kira_giderler tablosu henüz oluşturulmamış olabilir — hata toleranslı yükle
+      const { data: gd, error: gErr } = await supabase
+        .from('kira_giderler').select('*').order('tarih', { ascending: false });
+      if (!gErr) {
+        setGiderler((gd || []).map(dbToGider));
+        setGiderTabloYok(false);
+      } else {
+        console.warn('kira_giderler tablosu bulunamadı — Supabase SQL Editor\'de supabase_tablolar.sql çalıştırın:', gErr.message);
+        setGiderler([]);
+        setGiderTabloYok(true);
+      }
       setYukleniyor(false);
     }
     yukle();
@@ -800,13 +811,23 @@ export default function KiraPage() {
     };
     if (giderDuzenle) {
       const { error } = await supabase.from('kira_giderler').update(row).eq('id', giderDuzenle.id);
-      if (!error) setGiderler(prev => prev.map(g => g.id === giderDuzenle.id ? { ...g, ...dbToGider({ id: giderDuzenle.id, ...row }) } : g));
-      else alert('Güncelleme hatası: ' + error.message);
+      if (!error) {
+        setGiderler(prev => prev.map(g => g.id === giderDuzenle.id ? { ...g, ...dbToGider({ id: giderDuzenle.id, ...row }) } : g));
+      } else if (error.message?.includes('does not exist') || error.code === '42P01') {
+        alert('⚠️ kira_giderler tablosu henüz oluşturulmamış!\n\nSupabase SQL Editor\'e gidin ve supabase_tablolar.sql dosyasındaki SQL\'i çalıştırın.');
+      } else {
+        alert('Güncelleme hatası: ' + error.message);
+      }
       setGiderDuzenle(null);
     } else {
       const { data, error } = await supabase.from('kira_giderler').insert(row).select().single();
-      if (!error && data) setGiderler(prev => [dbToGider(data), ...prev]);
-      else alert('Gider eklenemedi: ' + (error?.message || ''));
+      if (!error && data) {
+        setGiderler(prev => [dbToGider(data), ...prev]);
+      } else if (error?.message?.includes('does not exist') || error?.code === '42P01') {
+        alert('⚠️ kira_giderler tablosu henüz oluşturulmamış!\n\nSupabase SQL Editor\'e gidin ve supabase_tablolar.sql dosyasındaki SQL\'i çalıştırın.');
+      } else {
+        alert('Gider eklenemedi: ' + (error?.message || ''));
+      }
     }
     setGiderModal(false);
     setGiderForm({ mulkId:'', tarih: new Date().toISOString().split('T')[0], tutar:'', kategori:'Bakım/Onarım', aciklama:'' });
@@ -815,7 +836,11 @@ export default function KiraPage() {
 
   const giderSil = async (id) => {
     const { error } = await supabase.from('kira_giderler').delete().eq('id', id);
-    if (!error) setGiderler(prev => prev.filter(g => g.id !== id));
+    if (!error) {
+      setGiderler(prev => prev.filter(g => g.id !== id));
+    } else if (error.message?.includes('does not exist') || error.code === '42P01') {
+      alert('⚠️ kira_giderler tablosu bulunamadı. Supabase SQL Editor\'de tabloyu oluşturun.');
+    }
     setGiderSilOnay(null);
   };
 
@@ -1429,6 +1454,23 @@ export default function KiraPage() {
       {/* ═══ GİDERLER ═══ */}
       {aktifTab === 'giderler' && (
         <div>
+          {/* Tablo yok uyarısı */}
+          {giderTabloYok && (
+            <div style={{ background:'linear-gradient(135deg,#FEF9C3,#FEF3C7)', border:'2px solid #F59E0B', borderRadius:'14px', padding:'20px 24px', marginBottom:'16px' }}>
+              <div style={{ fontSize:'16px', fontWeight:'800', color:'#92400E', marginBottom:'8px' }}>⚠️ Gider tablosu henüz oluşturulmamış!</div>
+              <div style={{ fontSize:'14px', color:'#78350F', marginBottom:'12px' }}>
+                Supabase'de <code style={{ background:'#FDE68A', padding:'2px 6px', borderRadius:'4px', fontFamily:'monospace' }}>kira_giderler</code> tablosu bulunamadı.
+                Aşağıdaki adımları izleyin:
+              </div>
+              <ol style={{ margin:'0 0 0 20px', fontSize:'13px', color:'#78350F', lineHeight:'1.8' }}>
+                <li>Supabase Dashboard → <b>SQL Editor</b> bölümüne gidin</li>
+                <li>Projenizdeki <b>supabase_tablolar.sql</b> dosyasını açın</li>
+                <li>Dosyanın tamamını kopyalayıp SQL Editor'e yapıştırın ve <b>Run</b> butonuna basın</li>
+                <li>Sayfayı yenileyin (F5)</li>
+              </ol>
+            </div>
+          )}
+
           {/* Özet */}
           <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'12px', marginBottom:'16px' }}>
             {[
