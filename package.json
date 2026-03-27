@@ -16,6 +16,7 @@
     "start": "react-scripts start",
     "build": "react-scripts build"
   },
+  "homepage": "/kurs",
   "browserslist": {
     "production": [
       ">0.2%",
