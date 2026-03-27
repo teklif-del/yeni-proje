@@ -35,13 +35,14 @@ function dbToMulk(row) {
   };
 }
 
+// Supabase'de hangi kolonlar var? Her ikisi de ALTER TABLE ile eklenmeli.
+// Eklenmediyse hâlâ çalışsın diye try/catch korunuyor.
 function mulkToDB(m) {
-  return {
+  const obj = {
     ad:                m.ad,
     adres:             m.adres || '',
     tip:               m.tip || 'daire',
     kiraci:            m.kiraci || '',
-    kiraci_tc:         m.kiraci_tc || '',
     kiraci_telefon:    m.kiraci_telefon || '',
     kiraci_email:      m.kiraci_email || '',
     aylik_kira:        Number(m.aylikKira) || 0,
@@ -51,8 +52,11 @@ function mulkToDB(m) {
     yenileme_aktif:    Boolean(m.yenilemeAktif),
     yenileme_orani:    Number(m.yenilemeOrani) || 20,
     durum:             m.durum || 'aktif',
-    fatura_kes:        Boolean(m.faturaKes),
   };
+  // Bu kolonlar ALTER TABLE ile eklendikten sonra çalışır
+  if (m.kiraci_tc !== undefined) obj.kiraci_tc = m.kiraci_tc || '';
+  if (m.faturaKes !== undefined) obj.fatura_kes = Boolean(m.faturaKes);
+  return obj;
 }
 
 function dbToOdeme(row) {
@@ -548,6 +552,27 @@ function SozlesmeKarti({ mulk, onYenile }) {
   );
 }
 
+// ─── INPUT HELPER (Ana bileşen dışında - focus sorunu önlenir) ────
+function Inp({ label, name, tip='text', options, tam, zorunlu, form: f, setForm: sf }) {
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:'5px', gridColumn: tam ? '1/-1' : undefined }}>
+      <label style={{ fontSize:'12px', fontWeight:'600', color:'#374151' }}>
+        {label}{zorunlu && <span style={{ color:'#EF4444' }}> *</span>}
+      </label>
+      {options ? (
+        <select style={{ padding:'9px 12px', border:'1.5px solid #E2E8F0', borderRadius:'8px', fontSize:'14px', outline:'none', background:'white' }}
+          value={f[name]??''} onChange={e => sf(p=>({...p,[name]:e.target.value}))}>
+          <option value="">Seçin...</option>
+          {options.map(o => <option key={o.value??o} value={o.value??o}>{o.label??o}</option>)}
+        </select>
+      ) : (
+        <input style={{ padding:'9px 12px', border:'1.5px solid #E2E8F0', borderRadius:'8px', fontSize:'14px', outline:'none' }}
+          type={tip} value={f[name]??''} onChange={e => sf(p=>({...p,[name]:e.target.value}))} placeholder={label} />
+      )}
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════
 //  ANA SAYFA
 // ═══════════════════════════════════════════════════════════
@@ -792,25 +817,6 @@ export default function KiraPage() {
     setOdemeModal(false);
     setOdemeForm({ mulkId:'', tarih: new Date().toISOString().split('T')[0], tutar:'', aciklama:'', durum:'odendi' });
   };
-
-  // ─── Input helper ────────────────────────────────────────
-  const Inp = ({ label, name, tip='text', options, tam, zorunlu, form: f=form, setForm: sf=setForm }) => (
-    <div style={{ display:'flex', flexDirection:'column', gap:'5px', gridColumn: tam ? '1/-1' : undefined }}>
-      <label style={{ fontSize:'12px', fontWeight:'600', color:'#374151' }}>
-        {label}{zorunlu && <span style={{ color:'#EF4444' }}> *</span>}
-      </label>
-      {options ? (
-        <select style={{ padding:'9px 12px', border:'1.5px solid #E2E8F0', borderRadius:'8px', fontSize:'14px', outline:'none', background:'white' }}
-          value={f[name]??''} onChange={e => sf(p=>({...p,[name]:e.target.value}))}>
-          <option value="">Seçin...</option>
-          {options.map(o => <option key={o.value??o} value={o.value??o}>{o.label??o}</option>)}
-        </select>
-      ) : (
-        <input style={{ padding:'9px 12px', border:'1.5px solid #E2E8F0', borderRadius:'8px', fontSize:'14px', outline:'none' }}
-          type={tip} value={f[name]??''} onChange={e => sf(p=>({...p,[name]:e.target.value}))} placeholder={label} />
-      )}
-    </div>
-  );
 
   if (yukleniyor) return (
     <div style={{ display:'flex', justifyContent:'center', alignItems:'center', height:'300px', flexDirection:'column', gap:'16px' }}>
@@ -1386,18 +1392,18 @@ export default function KiraPage() {
       <Modal acik={yeniModal || !!duzenleModal} kapat={() => { setYeniModal(false); setDuzenle(null); setForm(BOSFORM); }}
         baslik={duzenleModal ? '✏️ Mülk Düzenle' : '+ Yeni Mülk Ekle'} genislik="640px">
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
-          <Inp label="Mülk Adı" name="ad" zorunlu tam />
-          <Inp label="Adres" name="adres" tam />
-          <Inp label="Mülk Tipi" name="tip" options={TIPLER.map(t=>({ value:t, label:`${TIP_IKONLARI[t]||'🏠'} ${t.charAt(0).toUpperCase()+t.slice(1)}` }))} />
-          <Inp label="Durum" name="durum" options={[{value:'aktif',label:'✅ Kiralık'},{value:'bos',label:'🔑 Boş'}]} />
-          <Inp label="Kiracı Adı" name="kiraci" />
-          <Inp label="Kiracı TC No (opsiyonel)" name="kiraci_tc" />
-          <Inp label="Kiracı Telefon" name="kiraci_telefon" />
-          <Inp label="Kiracı E-posta" name="kiraci_email" tip="email" />
-          <Inp label="Aylık Kira (₺)" name="aylikKira" tip="number" />
-          <Inp label="Depozito (₺)" name="depozito" tip="number" />
-          <Inp label="Sözleşme Başlangıç" name="sozlesmeBaslangic" tip="date" />
-          <Inp label="Sözleşme Bitiş" name="sozlesmeBitis" tip="date" />
+          <Inp label="Mülk Adı" name="ad" zorunlu tam form={form} setForm={setForm} />
+          <Inp label="Adres" name="adres" tam form={form} setForm={setForm} />
+          <Inp label="Mülk Tipi" name="tip" options={TIPLER.map(t=>({ value:t, label:`${TIP_IKONLARI[t]||'🏠'} ${t.charAt(0).toUpperCase()+t.slice(1)}` }))} form={form} setForm={setForm} />
+          <Inp label="Durum" name="durum" options={[{value:'aktif',label:'✅ Kiralık'},{value:'bos',label:'🔑 Boş'}]} form={form} setForm={setForm} />
+          <Inp label="Kiracı Adı" name="kiraci" form={form} setForm={setForm} />
+          <Inp label="Kiracı TC No (opsiyonel)" name="kiraci_tc" form={form} setForm={setForm} />
+          <Inp label="Kiracı Telefon" name="kiraci_telefon" form={form} setForm={setForm} />
+          <Inp label="Kiracı E-posta" name="kiraci_email" tip="email" form={form} setForm={setForm} />
+          <Inp label="Aylık Kira (₺)" name="aylikKira" tip="number" form={form} setForm={setForm} />
+          <Inp label="Depozito (₺)" name="depozito" tip="number" form={form} setForm={setForm} />
+          <Inp label="Sözleşme Başlangıç" name="sozlesmeBaslangic" tip="date" form={form} setForm={setForm} />
+          <Inp label="Sözleşme Bitiş" name="sozlesmeBitis" tip="date" form={form} setForm={setForm} />
 
           {/* Fatura Kesilecek */}
           <div style={{ gridColumn:'1/-1', background:'linear-gradient(135deg,#F0FDF4,#DCFCE7)', border:'2px solid #86EFAC', borderRadius:'12px', padding:'14px 16px' }}>
