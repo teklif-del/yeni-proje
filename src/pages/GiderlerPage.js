@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
-import { SUBELER, SIRKETLER } from '../data/mockData';
 import Modal from '../components/Modal';
+import { supabase } from '../lib/supabase';
 
 // ─── KATEGORİ TANIMI ───────────────────────────────────────
 const KATEGORILER = [
@@ -49,6 +49,9 @@ function InfoSatir({ etiket, deger, renk }) {
 // ─── ANA SAYFA ─────────────────────────────────────────────
 export default function GiderlerPage() {
   const [giderler, setGiderler] = useState(BASLANGIC_GIDERLER);
+  const [subeler,  setSubeler]  = useState([]);
+  const [sirketler,setSirketler]= useState([]);
+  const [yukleniyor, setYukleniyor] = useState(true);
   const [aktifTab, setAktifTab]   = useState('liste');
   const [aramaMetni, setArama]    = useState('');
   const [katFiltre, setKatFiltre] = useState('tumu');
@@ -60,6 +63,21 @@ export default function GiderlerPage() {
   const [detayModal, setDetay]       = useState(null);
   const [silOnay, setSilOnay]        = useState(null);
   const [form, setForm]              = useState(BOSfORM);
+
+  // ── Supabase'den şube & şirket yükle ──
+  useEffect(() => {
+    async function yukle() {
+      setYukleniyor(true);
+      const [{ data: sd }, { data: srd }] = await Promise.all([
+        supabase.from('subeler').select('*').order('id'),
+        supabase.from('sirketler').select('*').order('id'),
+      ]);
+      setSubeler(sd || []);
+      setSirketler(srd || []);
+      setYukleniyor(false);
+    }
+    yukle();
+  }, []);
 
   // ── filtre ──
   const filtrelenenler = useMemo(() => giderler.filter(g => {
@@ -95,7 +113,7 @@ export default function GiderlerPage() {
   // ── kaydet ──
   const kaydet = () => {
     if (!form.kategori || !form.tutar || !form.tarih) { alert('Kategori, tutar ve tarih zorunludur!'); return; }
-    const obj = { ...form, subeId: parseInt(form.subeId) || 1, tutar: parseFloat(form.tutar) || 0, kdv: parseFloat(form.kdv) || 0 };
+    const obj = { ...form, subeId: parseInt(form.subeId) || null, tutar: parseFloat(form.tutar) || 0, kdv: parseFloat(form.kdv) || 0 };
     if (duzenleModal) {
       setGiderler(prev => prev.map(g => g.id === duzenleModal.id ? { ...g, ...obj } : g));
       setDuzenle(null);
@@ -188,7 +206,7 @@ export default function GiderlerPage() {
             </select>
             <select className="secim-input" value={subeFiltre} onChange={e => setSubeFiltre(e.target.value)}>
               <option value="tumu">Tüm Şubeler</option>
-              {SUBELER.map(s => <option key={s.id} value={s.id}>{SIRKETLER.find(sr=>sr.id===s.sirketId)?.ikon} {s.ilce}</option>)}
+              {subeler.map(s => { const sr = sirketler.find(x=>x.id===s.sirket_id); return <option key={s.id} value={s.id}>{sr?.ikon} {s.ad || s.ilce}</option>; })}
             </select>
             <select className="secim-input" value={durumFiltre} onChange={e => setDurumFiltre(e.target.value)}>
               <option value="tumu">Tüm Durumlar</option>
@@ -235,8 +253,8 @@ export default function GiderlerPage() {
                 <tbody>
                   {filtrelenenler.map(g => {
                     const kat  = KAT_MAP[g.kategori];
-                    const sube = SUBELER.find(s => s.id === g.subeId);
-                    const sirket = SIRKETLER.find(s => s.id === sube?.sirketId);
+                    const sube = subeler.find(s => s.id === g.subeId);
+                    const sirket = sirketler.find(s => s.id === sube?.sirket_id);
                     return (
                       <tr key={g.id}>
                         <td>
@@ -248,7 +266,7 @@ export default function GiderlerPage() {
                             </div>
                           </div>
                         </td>
-                        <td><div className="text-sm">{sirket?.ikon} {sube?.ilce}</div></td>
+                        <td><div className="text-sm">{sirket?.ikon} {sube?.ad || sube?.ilce}</div></td>
                         <td><div className="text-sm" style={{ maxWidth:'180px' }}>{g.aciklama}</div></td>
                         <td><span style={{ fontSize:'11px', background:'#F1F5F9', padding:'2px 6px', borderRadius:'4px', fontFamily:'monospace' }}>{g.belgeNo || '—'}</span></td>
                         <td className="text-sm">{g.tarih}</td>
@@ -348,13 +366,13 @@ export default function GiderlerPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {SUBELER.filter(s => giderler.some(g=>g.subeId===s.id)).map(sube => {
-                    const sirket = SIRKETLER.find(s=>s.id===sube.sirketId);
+                  {subeler.filter(s => giderler.some(g=>g.subeId===s.id)).map(sube => {
+                    const sirket = sirketler.find(x=>x.id===sube.sirket_id);
                     const subeGiderler = giderler.filter(g=>g.subeId===sube.id);
                     const toplam = subeGiderler.reduce((s,g)=>s+g.tutar,0);
                     return (
                       <tr key={sube.id}>
-                        <td><div className="font-semibold text-sm">{sirket?.ikon} {sube.ilce}</div></td>
+                        <td><div className="font-semibold text-sm">{sirket?.ikon} {sube.ad||sube.ilce}</div></td>
                         {KATEGORILER.filter(k => giderler.some(g=>g.kategori===k.id)).map(k=>{
                           const t = subeGiderler.filter(g=>g.kategori===k.id).reduce((s,g)=>s+g.tutar,0);
                           return <td key={k.id} className="text-sm" style={{ color: t>0?k.renk:'#CBD5E1' }}>{t>0?`₺${t.toLocaleString('tr-TR')}`:'—'}</td>;
@@ -461,7 +479,7 @@ export default function GiderlerPage() {
                 {giderler.filter(g=>g.durum==='bekliyor').sort((a,b)=>new Date(a.tarih)-new Date(b.tarih)).map(g=>{
                   const kat  = KAT_MAP[g.kategori];
                   const sube = subeler.find(s=>s.id===g.subeId);
-                  const sirket = sirketler.find(s=>s.id===(sube?.sirket_id||sube?.sirketId));
+                  const sirket = sirketler.find(s=>s.id===sube?.sirket_id);
                   const gecmis = new Date(g.tarih) < new Date();
                   return (
                     <tr key={g.id} style={{ background: gecmis ? '#FFF5F5' : 'white' }}>
@@ -474,7 +492,7 @@ export default function GiderlerPage() {
                           </div>
                         </div>
                       </td>
-                      <td className="text-sm">{sirket?.ikon} {sube?.ilce||sube?.ad}</td>
+                      <td className="text-sm">{sirket?.ikon} {sube?.ad||sube?.ilce}</td>
                       <td className="text-sm">{g.aciklama}</td>
                       <td>
                         <span style={{ color: gecmis?'#EF4444':'#374151', fontWeight: gecmis?'700':'400', fontSize:'13px' }}>
@@ -542,7 +560,7 @@ export default function GiderlerPage() {
             </div>
 
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
-              <Inp label="Şube" name="subeId" zorunlu options={SUBELER.map(s => ({ value: s.id, label: `${SIRKETLER.find(sr=>sr.id===s.sirketId)?.ikon} ${s.ad}` }))} />
+              <Inp label="Şube" name="subeId" zorunlu options={subeler.map(s => { const sr = sirketler.find(x=>x.id===s.sirket_id); return { value: s.id, label: `${sr?.ikon||'🏢'} ${s.ad||s.ilce||''}` }; })} />
               {altTipler.length > 0
                 ? <Inp label="Alt Tip" name="altTip" options={altTipler.map(t => ({ value: t, label: t }))} />
                 : <Inp label="Alt Tip / Açıklama" name="altTip" />
@@ -583,8 +601,8 @@ export default function GiderlerPage() {
       <Modal acik={!!detayModal} kapat={() => setDetay(null)} baslik="📋 Gider Detayı" genislik="500px">
         {detayModal && (() => {
           const kat  = KAT_MAP[detayModal.kategori];
-          const sube = SUBELER.find(s => s.id === detayModal.subeId);
-          const sirket = SIRKETLER.find(s => s.id === sube?.sirketId);
+          const sube = subeler.find(s => s.id === detayModal.subeId);
+          const sirket = sirketler.find(s => s.id === sube?.sirket_id);
           return (
             <>
               <div style={{ display:'flex', alignItems:'center', gap:'14px', background: kat?.renk+'15', borderRadius:'10px', padding:'16px', marginBottom:'20px' }}>
@@ -598,7 +616,7 @@ export default function GiderlerPage() {
                 </span>
               </div>
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginBottom:'20px' }}>
-                <InfoSatir etiket="Şube" deger={`${sirket?.ikon} ${sube?.ad}`} />
+                <InfoSatir etiket="Şube" deger={`${sirket?.ikon||''} ${sube?.ad||sube?.ilce||'—'}`} />
                 <InfoSatir etiket="Tarih" deger={detayModal.tarih} />
                 <InfoSatir etiket="Belge / Fatura No" deger={detayModal.belgeNo} />
                 <InfoSatir etiket="Tekrar" deger={detayModal.tekrar === 'tek_sefer' ? 'Tek Seferlik' : detayModal.tekrar === 'aylik' ? 'Aylık' : detayModal.tekrar} />
