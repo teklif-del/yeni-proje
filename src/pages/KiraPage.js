@@ -8,9 +8,9 @@ const TIPLER = ['ofis', 'dukkan', 'depo', 'daire', 'arsa', 'fabrika', 'diger'];
 const AY_ADLARI = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
 
 const BOSFORM = {
-  ad:'', adres:'', tip:'daire', kiraci:'', kiraci_telefon:'', kiraci_email:'',
+  ad:'', adres:'', tip:'daire', kiraci:'', kiraci_tc:'', kiraci_telefon:'', kiraci_email:'',
   aylikKira:'', depozito:'', sozlesmeBaslangic:'', sozlesmeBitis:'',
-  yenilemeAktif: false, yenilemeOrani:'20', durum:'aktif',
+  yenilemeAktif: false, yenilemeOrani:'20', durum:'aktif', faturaKes: false,
 };
 
 // DB satırı → uygulama objesi
@@ -21,6 +21,7 @@ function dbToMulk(row) {
     adres:             row.adres || '',
     tip:               row.tip || 'daire',
     kiraci:            row.kiraci || '',
+    kiraci_tc:         row.kiraci_tc || '',
     kiraci_telefon:    row.kiraci_telefon || '',
     kiraci_email:      row.kiraci_email || '',
     aylikKira:         Number(row.aylik_kira) || 0,
@@ -30,6 +31,7 @@ function dbToMulk(row) {
     yenilemeAktif:     row.yenileme_aktif || false,
     yenilemeOrani:     Number(row.yenileme_orani) || 20,
     durum:             row.durum || 'aktif',
+    faturaKes:         row.fatura_kes || false,
   };
 }
 
@@ -39,6 +41,7 @@ function mulkToDB(m) {
     adres:             m.adres || '',
     tip:               m.tip || 'daire',
     kiraci:            m.kiraci || '',
+    kiraci_tc:         m.kiraci_tc || '',
     kiraci_telefon:    m.kiraci_telefon || '',
     kiraci_email:      m.kiraci_email || '',
     aylik_kira:        Number(m.aylikKira) || 0,
@@ -48,6 +51,7 @@ function mulkToDB(m) {
     yenileme_aktif:    Boolean(m.yenilemeAktif),
     yenileme_orani:    Number(m.yenilemeOrani) || 20,
     durum:             m.durum || 'aktif',
+    fatura_kes:        Boolean(m.faturaKes),
   };
 }
 
@@ -61,10 +65,14 @@ function dbToOdeme(row) {
     odenmeTarihi: row.odeme_tarihi || null,
     aciklama:     row.aciklama || '',
     durum:        row.durum || 'bekliyor',
+    faturaKesildi: row.fatura_kesildi || false,
+    faturaNo:     row.fatura_no || '',
+    faturaTarihi: row.fatura_tarihi || null,
   };
 }
 
 // ─── Sözleşme döneminden otomatik ödeme satırları üret ─────
+// DÜZELTİLDİ: Geçmiş ödemeler artık otomatik "ödendi" sayılmıyor
 const odemelerUret = (mulk) => {
   const liste = [];
   if (mulk.durum !== 'aktif' || !mulk.sozlesmeBaslangic) return liste;
@@ -78,21 +86,26 @@ const odemelerUret = (mulk) => {
     const vadeTarihi = new Date(cur.getFullYear(), cur.getMonth(), 1)
       .toISOString().split('T')[0];
     const vadeDt     = new Date(vadeTarihi);
+
+    // Geçmiş aylar → sadece "gecikme", hiçbiri otomatik "ödendi" olmaz
     let durum;
     if (vadeDt < new Date(bugun.getFullYear(), bugun.getMonth(), 1)) {
-      const ayFarki = (bugun.getFullYear() - vadeDt.getFullYear()) * 12 + (bugun.getMonth() - vadeDt.getMonth());
-      durum = ayFarki >= 2 ? 'odendi' : 'gecikme';
+      durum = 'gecikme';
     } else {
       durum = 'bekliyor';
     }
+
     liste.push({
       mulk_id:      mulk.id,
       vade_tarihi:  vadeTarihi,
       tutar:        mulk.aylikKira,
-      odenen_tutar: durum === 'odendi' ? mulk.aylikKira : 0,
-      odeme_tarihi: durum === 'odendi' ? vadeTarihi : null,
+      odenen_tutar: 0,
+      odeme_tarihi: null,
       aciklama:     '',
       durum,
+      fatura_kesildi: false,
+      fatura_no: '',
+      fatura_tarihi: null,
     });
     cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
   }
@@ -123,8 +136,164 @@ function InfoSatir({ etiket, deger, renk }) {
   );
 }
 
+// ─── KISMI ÖDEME / ONAY MODAL ───────────────────────────────
+function OdemeOnayModal({ odeme, mulk, acik, kapat, onOde }) {
+  const [kismiTutar, setKismiTutar] = useState('');
+  const [odemeYontemi, setOdemeYontemi] = useState('nakit');
+  const [odenmeTarihi, setOdenmeTarihi] = useState(new Date().toISOString().split('T')[0]);
+  const kalan = odeme ? odeme.tutar - odeme.odenenTutar : 0;
+
+  if (!acik || !odeme) return null;
+
+  const tamOde = () => {
+    onOde(odeme.id, kalan, odenmeTarihi, 'tam');
+    kapat();
+  };
+
+  const kismiOde = () => {
+    const miktar = parseFloat(kismiTutar);
+    if (!miktar || miktar <= 0 || miktar > kalan) {
+      alert(`Geçerli bir tutar girin (max ₺${kalan.toLocaleString('tr-TR')})`);
+      return;
+    }
+    onOde(odeme.id, miktar, odenmeTarihi, 'kismi');
+    kapat();
+  };
+
+  return (
+    <Modal acik={acik} kapat={kapat} baslik="💳 Ödeme Al" genislik="460px">
+      <div style={{ marginBottom:'16px', background:'linear-gradient(135deg,#1E3A5F,#0F2140)', borderRadius:'12px', padding:'16px', color:'white' }}>
+        <div style={{ fontSize:'13px', color:'#94A3B8', marginBottom:'4px' }}>{mulk?.ad} — {odeme?.vadeTarihi && `${AY_ADLARI[new Date(odeme.vadeTarihi).getMonth()]} ${new Date(odeme.vadeTarihi).getFullYear()}`}</div>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <div>
+            <div style={{ fontSize:'12px', color:'#94A3B8' }}>Kira Bedeli</div>
+            <div style={{ fontSize:'22px', fontWeight:'800', color:'#6EE7B7' }}>₺{odeme?.tutar?.toLocaleString('tr-TR')}</div>
+          </div>
+          {odeme?.odenenTutar > 0 && (
+            <div>
+              <div style={{ fontSize:'12px', color:'#94A3B8' }}>Daha Önce Ödenen</div>
+              <div style={{ fontSize:'18px', fontWeight:'700', color:'#FCD34D' }}>₺{odeme?.odenenTutar?.toLocaleString('tr-TR')}</div>
+            </div>
+          )}
+          <div>
+            <div style={{ fontSize:'12px', color:'#94A3B8' }}>Kalan Borç</div>
+            <div style={{ fontSize:'22px', fontWeight:'800', color:'#FCA5A5' }}>₺{kalan.toLocaleString('tr-TR')}</div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ marginBottom:'14px' }}>
+        <label style={{ fontSize:'12px', fontWeight:'600', color:'#374151', display:'block', marginBottom:'5px' }}>Ödeme Tarihi</label>
+        <input type="date" value={odenmeTarihi} onChange={e => setOdenmeTarihi(e.target.value)}
+          style={{ width:'100%', padding:'9px 12px', border:'1.5px solid #E2E8F0', borderRadius:'8px', fontSize:'14px', outline:'none', boxSizing:'border-box' }} />
+      </div>
+
+      <div style={{ marginBottom:'14px' }}>
+        <label style={{ fontSize:'12px', fontWeight:'600', color:'#374151', display:'block', marginBottom:'5px' }}>Ödeme Yöntemi</label>
+        <select value={odemeYontemi} onChange={e => setOdemeYontemi(e.target.value)}
+          style={{ width:'100%', padding:'9px 12px', border:'1.5px solid #E2E8F0', borderRadius:'8px', fontSize:'14px', outline:'none', background:'white' }}>
+          <option value="nakit">💵 Nakit</option>
+          <option value="havale">🏦 Havale/EFT</option>
+          <option value="kredi_karti">💳 Kredi Kartı</option>
+          <option value="cek">📄 Çek</option>
+        </select>
+      </div>
+
+      {/* TAM ÖDEME */}
+      <button onClick={tamOde}
+        style={{ width:'100%', background:'linear-gradient(135deg,#15803D,#16A34A)', color:'white', border:'none',
+          borderRadius:'10px', padding:'14px', fontSize:'15px', fontWeight:'800', cursor:'pointer', marginBottom:'12px',
+          boxShadow:'0 4px 14px rgba(21,128,61,0.4)' }}>
+        ✅ Tam Öde — ₺{kalan.toLocaleString('tr-TR')}
+      </button>
+
+      {/* KISMİ ÖDEME */}
+      <div style={{ background:'#F8FAFC', borderRadius:'10px', padding:'14px', border:'1px solid #E2E8F0' }}>
+        <div style={{ fontSize:'13px', fontWeight:'700', color:'#374151', marginBottom:'10px' }}>💰 Kısmi Ödeme</div>
+        <div style={{ display:'flex', gap:'8px' }}>
+          <input type="number" placeholder={`Max ₺${kalan.toLocaleString('tr-TR')}`}
+            value={kismiTutar} onChange={e => setKismiTutar(e.target.value)}
+            style={{ flex:1, padding:'9px 12px', border:'1.5px solid #E2E8F0', borderRadius:'8px', fontSize:'14px', outline:'none' }} />
+          <button onClick={kismiOde}
+            style={{ background:'linear-gradient(135deg,#3B82F6,#2563EB)', color:'white', border:'none',
+              borderRadius:'8px', padding:'9px 18px', fontSize:'13px', fontWeight:'700', cursor:'pointer' }}>
+            Kısmen Öde
+          </button>
+        </div>
+      </div>
+
+      <button onClick={kapat}
+        style={{ width:'100%', marginTop:'12px', background:'white', color:'#64748B', border:'1.5px solid #E2E8F0',
+          borderRadius:'8px', padding:'10px', fontSize:'13px', fontWeight:'600', cursor:'pointer' }}>
+        İptal
+      </button>
+    </Modal>
+  );
+}
+
+// ─── FATURA MODAL ───────────────────────────────────────────
+function FaturaModal({ odeme, mulk, acik, kapat, onFaturaKes }) {
+  const [faturaNo, setFaturaNo] = useState('');
+  const [faturaTarihi, setFaturaTarihi] = useState(new Date().toISOString().split('T')[0]);
+
+  if (!acik || !odeme || !mulk) return null;
+
+  const kes = () => {
+    onFaturaKes(odeme.id, faturaNo, faturaTarihi);
+    kapat();
+  };
+
+  return (
+    <Modal acik={acik} kapat={kapat} baslik="🧾 Fatura Kes" genislik="440px">
+      <div style={{ background:'linear-gradient(135deg,#F0FDF4,#DCFCE7)', borderRadius:'12px', padding:'16px', marginBottom:'16px', border:'1px solid #86EFAC' }}>
+        <div style={{ fontSize:'13px', color:'#14532D', fontWeight:'700', marginBottom:'8px' }}>📋 Fatura Bilgileri</div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px' }}>
+          <InfoSatir etiket="Mülk" deger={mulk?.ad} />
+          <InfoSatir etiket="Kiracı" deger={mulk?.kiraci} />
+          <InfoSatir etiket="TC No" deger={mulk?.kiraci_tc || '—'} />
+          <InfoSatir etiket="Dönem" deger={odeme?.vadeTarihi ? `${AY_ADLARI[new Date(odeme.vadeTarihi).getMonth()]} ${new Date(odeme.vadeTarihi).getFullYear()}` : '—'} />
+          <InfoSatir etiket="Tutar" deger={`₺${odeme?.tutar?.toLocaleString('tr-TR')}`} renk="#15803D" />
+          <InfoSatir etiket="Ödeme Tarihi" deger={odeme?.odenmeTarihi || '—'} />
+        </div>
+      </div>
+
+      <div style={{ display:'flex', flexDirection:'column', gap:'12px', marginBottom:'16px' }}>
+        <div>
+          <label style={{ fontSize:'12px', fontWeight:'600', color:'#374151', display:'block', marginBottom:'5px' }}>Fatura No (opsiyonel)</label>
+          <input type="text" placeholder="Ör: FAT-2026-001" value={faturaNo} onChange={e => setFaturaNo(e.target.value)}
+            style={{ width:'100%', padding:'9px 12px', border:'1.5px solid #E2E8F0', borderRadius:'8px', fontSize:'14px', outline:'none', boxSizing:'border-box' }} />
+        </div>
+        <div>
+          <label style={{ fontSize:'12px', fontWeight:'600', color:'#374151', display:'block', marginBottom:'5px' }}>Fatura Tarihi</label>
+          <input type="date" value={faturaTarihi} onChange={e => setFaturaTarihi(e.target.value)}
+            style={{ width:'100%', padding:'9px 12px', border:'1.5px solid #E2E8F0', borderRadius:'8px', fontSize:'14px', outline:'none', boxSizing:'border-box' }} />
+        </div>
+      </div>
+
+      <div style={{ background:'#FEF9C3', borderRadius:'8px', padding:'12px', marginBottom:'16px', border:'1px solid #FDE68A' }}>
+        <div style={{ fontSize:'12px', color:'#92400E', fontWeight:'600' }}>
+          ⚠️ Not: Entegratör API bağlantısı kurulduktan sonra fatura otomatik gönderilecek. Şimdilik manuel kayıt yapılıyor.
+        </div>
+      </div>
+
+      <div style={{ display:'flex', gap:'8px' }}>
+        <button onClick={kapat}
+          style={{ flex:1, background:'white', color:'#64748B', border:'1.5px solid #E2E8F0', borderRadius:'8px', padding:'10px', fontSize:'13px', fontWeight:'600', cursor:'pointer' }}>
+          İptal
+        </button>
+        <button onClick={kes}
+          style={{ flex:2, background:'linear-gradient(135deg,#059669,#047857)', color:'white', border:'none',
+            borderRadius:'8px', padding:'12px', fontSize:'14px', fontWeight:'800', cursor:'pointer',
+            boxShadow:'0 4px 14px rgba(5,150,105,0.4)' }}>
+          🧾 Fatura Kes
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── AY AY ÖDEME TABLOSU ────────────────────────────────────
-function AyAyOdemeler({ mulk, odemeler, onOde }) {
+function AyAyOdemeler({ mulk, odemeler, onOde, onFaturaModal }) {
   const [siralama, setSiralama] = useState('yeni');
 
   const mulkOdemeleri = odemeler
@@ -137,7 +306,6 @@ function AyAyOdemeler({ mulk, odemeler, onOde }) {
   const toplamOdenen = mulkOdemeleri.reduce((s, o) => s + o.odenenTutar, 0);
   const toplamKalan  = toplamBorc - toplamOdenen;
   const gecikmeAdet  = mulkOdemeleri.filter(o => o.durum === 'gecikme').length;
-  const bugun        = new Date();
 
   return (
     <div>
@@ -173,21 +341,22 @@ function AyAyOdemeler({ mulk, odemeler, onOde }) {
         <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'13px' }}>
           <thead>
             <tr style={{ background:'linear-gradient(135deg,#1E3A5F,#0F2140)' }}>
-              {['Dönem','Vade Tarihi','Kira Bedeli','Ödenen Tutar','Ödeme Tarihi','Kalan','Durum','İşlem'].map(h => (
+              {['Dönem','Vade Tarihi','Kira Bedeli','Ödenen Tutar','Kalan','Ödeme Tarihi','Durum','Fatura','İşlem'].map(h => (
                 <th key={h} style={{ padding:'11px 12px', textAlign:'left', fontSize:'11px', fontWeight:'700', color:'#CBD5E1', whiteSpace:'nowrap' }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {mulkOdemeleri.map((o, idx) => {
-              const dt        = new Date(o.vadeTarihi);
-              const kalan     = o.tutar - o.odenenTutar;
+              const dt         = new Date(o.vadeTarihi);
+              const kalan      = o.tutar - o.odenenTutar;
               const gecikmisMi = o.durum === 'gecikme';
-              const odendi    = o.durum === 'odendi';
+              const odendi     = o.durum === 'odendi';
+              const kismiMi    = o.odenenTutar > 0 && !odendi;
               return (
                 <tr key={o.id} style={{
                   borderBottom:'1px solid #F1F5F9',
-                  background: gecikmisMi ? 'linear-gradient(90deg,#FFF5F5,#FFFBFB)' : odendi ? 'linear-gradient(90deg,#F0FFF4,#F7FFF8)' : idx%2===0?'white':'#FAFBFF',
+                  background: gecikmisMi ? 'linear-gradient(90deg,#FFF5F5,#FFFBFB)' : odendi ? 'linear-gradient(90deg,#F0FFF4,#F7FFF8)' : kismiMi ? 'linear-gradient(90deg,#FEF9C3,#FFFEF5)' : idx%2===0?'white':'#FAFBFF',
                 }}>
                   <td style={{ padding:'12px', fontWeight:'700', color:'#1E293B', fontSize:'14px' }}>
                     {AY_ADLARI[dt.getMonth()]} {dt.getFullYear()}
@@ -208,20 +377,45 @@ function AyAyOdemeler({ mulk, odemeler, onOde }) {
                       ? <span style={{ fontWeight:'700', color:'#15803D', fontSize:'14px' }}>₺{o.odenenTutar.toLocaleString('tr-TR')}</span>
                       : <span style={{ color:'#CBD5E1' }}>—</span>}
                   </td>
+                  {/* KALAN - sıfır veya miktar */}
+                  <td style={{ padding:'12px' }}>
+                    {kalan > 0
+                      ? <span style={{ fontWeight:'800', color:'#DC2626', fontSize:'14px' }}>₺{kalan.toLocaleString('tr-TR')}</span>
+                      : <span style={{ fontWeight:'800', color:'#15803D', fontSize:'14px' }}>₺0</span>}
+                  </td>
+                  {/* ÖDEME TARİHİ */}
                   <td style={{ padding:'12px' }}>
                     {o.odenmeTarihi
                       ? <span style={{ fontSize:'12px', background:'#F0FDF4', padding:'3px 8px', borderRadius:'6px', border:'1px solid #86EFAC' }}>📅 {o.odenmeTarihi}</span>
                       : <span style={{ color:'#CBD5E1' }}>—</span>}
                   </td>
                   <td style={{ padding:'12px' }}>
-                    {kalan > 0
-                      ? <span style={{ fontWeight:'800', color:'#DC2626', fontSize:'14px' }}>₺{kalan.toLocaleString('tr-TR')}</span>
-                      : <span style={{ color:'#15803D', fontWeight:'700' }}>✔ Tamam</span>}
+                    {kismiMi
+                      ? <span style={{ padding:'4px 12px', borderRadius:'20px', fontSize:'12px', fontWeight:'700', background:'#FEF9C3', color:'#713F12', border:'1.5px solid #FDE68A' }}>💰 KISMİ</span>
+                      : <DurumBadge durum={o.durum} />}
                   </td>
-                  <td style={{ padding:'12px' }}><DurumBadge durum={o.durum} /></td>
+                  {/* FATURA */}
+                  <td style={{ padding:'12px' }}>
+                    {o.faturaKesildi ? (
+                      <div>
+                        <span style={{ background:'#DCFCE7', color:'#14532D', padding:'3px 8px', borderRadius:'8px', fontSize:'11px', fontWeight:'700', border:'1px solid #86EFAC' }}>
+                          🧾 Kesildi
+                        </span>
+                        {o.faturaNo && <div style={{ fontSize:'10px', color:'#64748B', marginTop:'2px' }}>{o.faturaNo}</div>}
+                      </div>
+                    ) : (odendi && mulk.faturaKes) ? (
+                      <button onClick={() => onFaturaModal(o)}
+                        style={{ background:'linear-gradient(135deg,#059669,#047857)', color:'white', border:'none',
+                          borderRadius:'8px', padding:'6px 12px', fontSize:'11px', fontWeight:'700', cursor:'pointer' }}>
+                        🧾 Fatura Kes
+                      </button>
+                    ) : (
+                      <span style={{ color:'#CBD5E1', fontSize:'12px' }}>—</span>
+                    )}
+                  </td>
                   <td style={{ padding:'12px' }}>
                     {!odendi ? (
-                      <button onClick={() => onOde(o.id)}
+                      <button onClick={() => onOde(o)}
                         style={{ background: gecikmisMi?'linear-gradient(135deg,#DC2626,#B91C1C)':'linear-gradient(135deg,#3B82F6,#2563EB)',
                           color:'white', border:'none', borderRadius:'8px', padding:'7px 16px',
                           fontSize:'12px', fontWeight:'700', cursor:'pointer' }}>
@@ -378,6 +572,14 @@ export default function KiraPage() {
   });
   const [kaydediliyor, setKaydediliyor] = useState(false);
 
+  // Kısmi/Onay ödeme modal
+  const [odemeOnayModal, setOdemeOnayModal] = useState(false);
+  const [seciliOdeme, setSeciliOdeme]       = useState(null);
+
+  // Fatura modal
+  const [faturaModalAcik, setFaturaModalAcik] = useState(false);
+  const [faturaOdeme, setFaturaOdeme]         = useState(null);
+
   // ─── Veri Yükle ──────────────────────────────────────────
   useEffect(() => {
     async function yukle() {
@@ -412,15 +614,63 @@ export default function KiraPage() {
       (m.adres||'').toLowerCase().includes(aramaMetni.toLowerCase())
     ), [mulkler, aramaMetni]);
 
-  // ─── Ödeme işaretle ──────────────────────────────────────
-  const odeIsaretle = async (odemeId) => {
-    const bugunStr = new Date().toISOString().split('T')[0];
+  // Fatura kesilecek ödemeler (ödendi + mülkün fatura_kes aktif + henüz fatura kesilmemiş)
+  const faturaKesilenOdemeler = useMemo(() =>
+    odemeler.filter(o => {
+      const m = mulkler.find(x => x.id === o.mulkId);
+      return o.durum === 'odendi' && m?.faturaKes && o.faturaKesildi;
+    }), [odemeler, mulkler]);
+
+  const faturaBekileyenOdemeler = useMemo(() =>
+    odemeler.filter(o => {
+      const m = mulkler.find(x => x.id === o.mulkId);
+      return o.durum === 'odendi' && m?.faturaKes && !o.faturaKesildi;
+    }), [odemeler, mulkler]);
+
+  // ─── Ödeme al (tam veya kısmi) ───────────────────────────
+  const odeIsaretle = async (odemeId, miktar, odenmeTarihi, tip) => {
+    const mevcut = odemeler.find(o => o.id === odemeId);
+    if (!mevcut) return;
+
+    const yeniOdenen = mevcut.odenenTutar + miktar;
+    const tamOdendi  = yeniOdenen >= mevcut.tutar;
+    const yeniDurum  = tamOdendi ? 'odendi' : mevcut.durum === 'gecikme' ? 'gecikme' : 'bekliyor';
+
     const { error } = await supabase.from('kira_odemeleri')
-      .update({ durum:'odendi', odenen_tutar: odemeler.find(o=>o.id===odemeId)?.tutar || 0, odeme_tarihi: bugunStr })
+      .update({
+        durum:        yeniDurum,
+        odenen_tutar: yeniOdenen,
+        odeme_tarihi: tamOdendi ? odenmeTarihi : (mevcut.odenmeTarihi || odenmeTarihi),
+      })
+      .eq('id', odemeId);
+
+    if (!error) {
+      setOdemeler(prev => prev.map(o => o.id === odemeId
+        ? { ...o, durum: yeniDurum, odenenTutar: yeniOdenen, odenmeTarihi: tamOdendi ? odenmeTarihi : o.odenmeTarihi }
+        : o));
+
+      // Eğer mülkün fatura_kes aktifse ve tam ödendiyse otomatik fatura listesine düşer (fatura modal açılır)
+      if (tamOdendi) {
+        const m = mulkler.find(x => x.id === mevcut.mulkId);
+        if (m?.faturaKes) {
+          setTimeout(() => {
+            setFaturaOdeme({ ...mevcut, odenenTutar: yeniOdenen, durum: 'odendi', odenmeTarihi: odenmeTarihi });
+            setFaturaModalAcik(true);
+          }, 400);
+        }
+      }
+    }
+  };
+
+  // ─── Fatura kes ──────────────────────────────────────────
+  const faturaKes = async (odemeId, faturaNo, faturaTarihi) => {
+    const { error } = await supabase.from('kira_odemeleri')
+      .update({ fatura_kesildi: true, fatura_no: faturaNo, fatura_tarihi: faturaTarihi })
       .eq('id', odemeId);
     if (!error) {
-      setOdemeler(prev => prev.map(o => o.id===odemeId
-        ? { ...o, durum:'odendi', odenenTutar: o.tutar, odenmeTarihi: bugunStr } : o));
+      setOdemeler(prev => prev.map(o => o.id === odemeId
+        ? { ...o, faturaKesildi: true, faturaNo, faturaTarihi }
+        : o));
     }
   };
 
@@ -451,7 +701,6 @@ export default function KiraPage() {
 
     if (!error) {
       setMulkler(prev => prev.map(x => x.id===mulkId ? guncelM : x));
-      // Yeni dönem ödemelerini DB'ye ekle
       const yeniSatirlar = odemelerUret(guncelM);
       if (yeniSatirlar.length > 0) {
         const { data: eklenen } = await supabase.from('kira_odemeleri').insert(yeniSatirlar).select();
@@ -471,6 +720,7 @@ export default function KiraPage() {
       depozito:     parseFloat(form.depozito) || 0,
       yenilemeOrani: parseFloat(form.yenilemeOrani) || 0,
       yenilemeAktif: Boolean(form.yenilemeAktif),
+      faturaKes:    Boolean(form.faturaKes),
     };
 
     if (duzenleModal) {
@@ -478,7 +728,6 @@ export default function KiraPage() {
       if (!error) {
         const guncel = { ...duzenleModal, ...obj };
         setMulkler(prev => prev.map(m => m.id===duzenleModal.id ? guncel : m));
-        // Eski ödemeleri sil, yenilerini üret
         await supabase.from('kira_odemeleri').delete().eq('mulk_id', duzenleModal.id);
         const yeniSatirlar = odemelerUret(guncel);
         if (yeniSatirlar.length > 0) {
@@ -511,7 +760,6 @@ export default function KiraPage() {
 
   // ─── Mülk sil ────────────────────────────────────────────
   const mulkSil = async (id) => {
-    // kira_odemeleri CASCADE ile silinir
     const { error } = await supabase.from('kira_mulkleri').delete().eq('id', id);
     if (!error) {
       setMulkler(prev => prev.filter(m => m.id !== id));
@@ -537,6 +785,7 @@ export default function KiraPage() {
       odeme_tarihi: odemeForm.durum === 'odendi' ? odemeForm.tarih : null,
       aciklama:     odemeForm.aciklama || '',
       durum:        odemeForm.durum,
+      fatura_kesildi: false,
     };
     const { data, error } = await supabase.from('kira_odemeleri').insert(row).select().single();
     if (!error && data) setOdemeler(prev => [...prev, dbToOdeme(data)]);
@@ -587,8 +836,8 @@ export default function KiraPage() {
           { ikon:'🔑', label:'Boş Mülk',           deger: mulkler.filter(m=>m.durum==='bos').length,    bg:'#FEE2E2', renk:'#DC2626' },
           { ikon:'⚠️', label:'GECİKMEDE',           deger: gecikmeCount,                                 bg:'#FEE2E2', renk:'#DC2626' },
           { ikon:'💳', label:'Tahsil Bekleyen',     deger:`₺${toplamKalan.toLocaleString('tr-TR')}`,     bg:'#EDE9FE', renk:'#6D28D9' },
-          { ikon:'🛡️', label:'Toplam Depozito',      deger:`₺${toplamDepozito.toLocaleString('tr-TR')}`,  bg:'#CFFAFE', renk:'#0E7490' },
-          { ikon:'📄', label:'Yaklaşan Sözleşme',  deger: yaklasiyanSozlesmeler.length,                 bg:'#FEF9C3', renk:'#D97706' },
+          { ikon:'🛡️', label:'Toplam Depozito',     deger:`₺${toplamDepozito.toLocaleString('tr-TR')}`,  bg:'#CFFAFE', renk:'#0E7490' },
+          { ikon:'🧾', label:'Fatura Bekleyen',     deger: faturaBekileyenOdemeler.length,               bg:'#FEF9C3', renk:'#D97706' },
         ].map(k => (
           <div key={k.label} className="ozet-kart">
             <div className="kart-ikon" style={{ background:k.bg, fontSize:'20px' }}>{k.ikon}</div>
@@ -632,6 +881,22 @@ export default function KiraPage() {
         </div>
       )}
 
+      {/* Fatura bekleyen uyarısı */}
+      {faturaBekileyenOdemeler.length > 0 && (
+        <div style={{ background:'linear-gradient(135deg,#FEF9C3,#FEF3C7)', border:'2px solid #FDE68A',
+          borderRadius:'12px', padding:'14px 18px', marginBottom:'16px', display:'flex', alignItems:'center', gap:'12px' }}>
+          <span style={{ fontSize:'28px' }}>🧾</span>
+          <div style={{ flex:1 }}>
+            <div style={{ fontWeight:'800', color:'#92400E', fontSize:'14px', marginBottom:'3px' }}>{faturaBekileyenOdemeler.length} adet fatura bekliyor!</div>
+            <div style={{ fontSize:'13px', color:'#78350F' }}>Ödeme alınan mülkler için fatura kesilmesi gerekiyor.</div>
+          </div>
+          <button className="btn btn-sm" onClick={() => setAktifTab('faturalar')}
+            style={{ background:'#D97706', color:'white', border:'none', borderRadius:'8px', padding:'8px 14px', fontWeight:'700', cursor:'pointer' }}>
+            Faturalar →
+          </button>
+        </div>
+      )}
+
       {/* Tab Bar */}
       <div className="tab-bar">
         <div className={`tab-item ${aktifTab==='mulkler'?'aktif':''}`}  onClick={()=>setAktifTab('mulkler')}>🏠 Mülkler</div>
@@ -641,6 +906,14 @@ export default function KiraPage() {
           {gecikmeCount > 0 && (
             <span style={{ marginLeft:'6px', background:'#EF4444', color:'white', borderRadius:'10px', padding:'1px 7px', fontSize:'11px', fontWeight:'700' }}>
               {gecikmeCount}
+            </span>
+          )}
+        </div>
+        <div className={`tab-item ${aktifTab==='faturalar'?'aktif':''}`} onClick={()=>setAktifTab('faturalar')}>
+          🧾 Faturalar
+          {faturaBekileyenOdemeler.length > 0 && (
+            <span style={{ marginLeft:'6px', background:'#D97706', color:'white', borderRadius:'10px', padding:'1px 7px', fontSize:'11px', fontWeight:'700' }}>
+              {faturaBekileyenOdemeler.length}
             </span>
           )}
         </div>
@@ -665,7 +938,7 @@ export default function KiraPage() {
                 <thead>
                   <tr>
                     <th>Mülk</th><th>Kiracı</th><th>Aylık Kira</th><th>Sözleşme</th>
-                    <th>Yenileme</th><th>Ödeme Özeti</th><th>Durum</th><th>İşlem</th>
+                    <th>Yenileme</th><th>Fatura</th><th>Ödeme Özeti</th><th>Durum</th><th>İşlem</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -690,6 +963,7 @@ export default function KiraPage() {
                         <td>
                           <div style={{ fontWeight:'600', fontSize:'13px' }}>{m.kiraci||<span style={{color:'#CBD5E1'}}>—</span>}</div>
                           {m.kiraci_telefon && <div style={{ fontSize:'11px', color:'#64748B' }}>{m.kiraci_telefon}</div>}
+                          {m.kiraci_tc && <div style={{ fontSize:'11px', color:'#94A3B8' }}>TC: {m.kiraci_tc}</div>}
                         </td>
                         <td>
                           <span style={{ fontWeight:'800', fontSize:'15px', color:'#059669' }}>
@@ -718,6 +992,11 @@ export default function KiraPage() {
                             : <span style={{ background:'#F1F5F9', color:'#64748B', padding:'4px 10px', borderRadius:'12px', fontSize:'12px', fontWeight:'600' }}>Manuel</span>}
                         </td>
                         <td>
+                          {m.faturaKes
+                            ? <span style={{ background:'#DCFCE7', color:'#14532D', padding:'4px 10px', borderRadius:'12px', fontSize:'12px', fontWeight:'700' }}>🧾 Aktif</span>
+                            : <span style={{ background:'#F1F5F9', color:'#94A3B8', padding:'4px 10px', borderRadius:'12px', fontSize:'12px', fontWeight:'600' }}>—</span>}
+                        </td>
+                        <td>
                           <div style={{ display:'flex', gap:'4px', flexWrap:'wrap' }}>
                             {odenmis>0  && <span style={{background:'#DCFCE7',color:'#14532D',padding:'2px 7px',borderRadius:'8px',fontSize:'11px',fontWeight:'700'}}>✅{odenmis}</span>}
                             {gecikme>0  && <span style={{background:'#FEE2E2',color:'#7F1D1D',padding:'2px 7px',borderRadius:'8px',fontSize:'11px',fontWeight:'700'}}>🔴{gecikme}</span>}
@@ -741,7 +1020,7 @@ export default function KiraPage() {
                     );
                   })}
                   {filtrelenmis.length === 0 && (
-                    <tr><td colSpan={8} style={{ textAlign:'center', padding:'40px', color:'#64748B' }}>Arama sonucu bulunamadı.</td></tr>
+                    <tr><td colSpan={9} style={{ textAlign:'center', padding:'40px', color:'#64748B' }}>Arama sonucu bulunamadı.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -762,7 +1041,7 @@ export default function KiraPage() {
               <thead>
                 <tr>
                   <th>Mülk / Kiracı</th><th>Dönem</th><th>Vade Tarihi</th><th>Borç</th>
-                  <th>Ödenen</th><th>Ödeme Tarihi</th><th>Kalan</th><th>Durum</th><th>İşlem</th>
+                  <th>Ödenen</th><th>Kalan</th><th>Ödeme Tarihi</th><th>Durum</th><th>Fatura</th><th>İşlem</th>
                 </tr>
               </thead>
               <tbody>
@@ -770,9 +1049,10 @@ export default function KiraPage() {
                   const m   = mulkler.find(x=>x.id===o.mulkId);
                   const kalan = o.tutar - o.odenenTutar;
                   const dt  = new Date(o.vadeTarihi);
+                  const kismiMi = o.odenenTutar > 0 && o.durum !== 'odendi';
                   return (
                     <tr key={o.id} style={{
-                      background: o.durum==='gecikme' ? 'linear-gradient(90deg,#FFF5F5,white)' : o.durum==='odendi' ? 'linear-gradient(90deg,#F0FFF4,white)' : 'white'
+                      background: o.durum==='gecikme' ? 'linear-gradient(90deg,#FFF5F5,white)' : o.durum==='odendi' ? 'linear-gradient(90deg,#F0FFF4,white)' : kismiMi ? 'linear-gradient(90deg,#FFFBF0,white)' : 'white'
                     }}>
                       <td>
                         <div style={{ fontWeight:'700', fontSize:'13px' }}>{TIP_IKONLARI[m?.tip]} {m?.ad}</div>
@@ -788,12 +1068,28 @@ export default function KiraPage() {
                       <td style={{ fontWeight:'700', color: o.odenenTutar>0?'#15803D':'#CBD5E1' }}>
                         {o.odenenTutar>0 ? `₺${o.odenenTutar.toLocaleString('tr-TR')}` : '—'}
                       </td>
+                      <td style={{ fontWeight:'800', color: kalan>0?'#DC2626':'#15803D' }}>
+                        ₺{kalan.toLocaleString('tr-TR')}
+                      </td>
                       <td style={{ fontSize:'12px' }}>{o.odenmeTarihi ? `📅 ${o.odenmeTarihi}` : '—'}</td>
-                      <td style={{ fontWeight:'800', color: kalan>0?'#DC2626':'#15803D' }}>{kalan>0 ? `₺${kalan.toLocaleString('tr-TR')}` : '✔'}</td>
-                      <td><DurumBadge durum={o.durum} /></td>
+                      <td>
+                        {kismiMi
+                          ? <span style={{ padding:'4px 10px', borderRadius:'20px', fontSize:'12px', fontWeight:'700', background:'#FEF9C3', color:'#713F12', border:'1.5px solid #FDE68A' }}>💰 KISMİ</span>
+                          : <DurumBadge durum={o.durum} />}
+                      </td>
+                      <td>
+                        {o.faturaKesildi ? (
+                          <span style={{ background:'#DCFCE7', color:'#14532D', padding:'3px 8px', borderRadius:'8px', fontSize:'11px', fontWeight:'700' }}>🧾 Kesildi</span>
+                        ) : (o.durum === 'odendi' && m?.faturaKes) ? (
+                          <button onClick={() => { setFaturaOdeme(o); setFaturaModalAcik(true); }}
+                            style={{ background:'#059669', color:'white', border:'none', borderRadius:'8px', padding:'5px 10px', fontSize:'11px', fontWeight:'700', cursor:'pointer' }}>
+                            🧾 Kes
+                          </button>
+                        ) : <span style={{ color:'#CBD5E1', fontSize:'11px' }}>—</span>}
+                      </td>
                       <td>
                         {o.durum !== 'odendi' ? (
-                          <button className="btn btn-success btn-sm" onClick={() => odeIsaretle(o.id)}>💳 ÖDE</button>
+                          <button className="btn btn-success btn-sm" onClick={() => { setSeciliOdeme(o); setOdemeOnayModal(true); }}>💳 ÖDE</button>
                         ) : (
                           <span style={{ fontSize:'12px', color:'#14532D', fontWeight:'700' }}>✅ ÖDENDİ</span>
                         )}
@@ -841,7 +1137,7 @@ export default function KiraPage() {
                         </div>
                       </td>
                       <td>
-                        <button onClick={() => odeIsaretle(o.id)}
+                        <button onClick={() => { setSeciliOdeme(o); setOdemeOnayModal(true); }}
                           style={{ background:'linear-gradient(135deg,#DC2626,#B91C1C)', color:'white', border:'none',
                             borderRadius:'8px', padding:'8px 18px', fontSize:'13px', fontWeight:'700', cursor:'pointer' }}>
                           ⚠️ GECİKMEYİ ÖDE
@@ -862,6 +1158,92 @@ export default function KiraPage() {
         </div>
       )}
 
+      {/* ═══ FATURALAR ═══ */}
+      {aktifTab === 'faturalar' && (
+        <div>
+          {/* Fatura Bekleyenler */}
+          {faturaBekileyenOdemeler.length > 0 && (
+            <div className="panel" style={{ marginBottom:'16px' }}>
+              <div className="panel-baslik">
+                <h3>🧾 Fatura Kesilecekler</h3>
+                <span style={{ background:'#FEF9C3', color:'#92400E', padding:'5px 14px', borderRadius:'12px', fontSize:'13px', fontWeight:'700' }}>
+                  {faturaBekileyenOdemeler.length} adet bekliyor
+                </span>
+              </div>
+              <div className="tablo-container">
+                <table>
+                  <thead>
+                    <tr><th>Mülk</th><th>Kiracı</th><th>TC No</th><th>Dönem</th><th>Tutar</th><th>Ödeme Tarihi</th><th>İşlem</th></tr>
+                  </thead>
+                  <tbody>
+                    {faturaBekileyenOdemeler.map(o => {
+                      const m = mulkler.find(x => x.id === o.mulkId);
+                      const dt = new Date(o.vadeTarihi);
+                      return (
+                        <tr key={o.id} style={{ background:'linear-gradient(90deg,#FFFBF0,white)' }}>
+                          <td><div style={{ fontWeight:'700' }}>{TIP_IKONLARI[m?.tip]} {m?.ad}</div></td>
+                          <td><div style={{ fontWeight:'600' }}>{m?.kiraci || '—'}</div></td>
+                          <td><div style={{ fontSize:'12px', color:'#64748B' }}>{m?.kiraci_tc || '—'}</div></td>
+                          <td>{AY_ADLARI[dt.getMonth()]} {dt.getFullYear()}</td>
+                          <td style={{ fontWeight:'800', color:'#059669' }}>₺{o.tutar.toLocaleString('tr-TR')}</td>
+                          <td style={{ fontSize:'12px' }}>{o.odenmeTarihi ? `📅 ${o.odenmeTarihi}` : '—'}</td>
+                          <td>
+                            <button onClick={() => { setFaturaOdeme(o); setFaturaModalAcik(true); }}
+                              style={{ background:'linear-gradient(135deg,#059669,#047857)', color:'white', border:'none',
+                                borderRadius:'8px', padding:'8px 16px', fontSize:'13px', fontWeight:'700', cursor:'pointer' }}>
+                              🧾 Fatura Kes
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Kesilen Faturalar */}
+          <div className="panel">
+            <div className="panel-baslik">
+              <h3>✅ Kesilen Faturalar</h3>
+              <span style={{ background:'#DCFCE7', color:'#14532D', padding:'5px 14px', borderRadius:'12px', fontSize:'13px', fontWeight:'700' }}>
+                {faturaKesilenOdemeler.length} adet
+              </span>
+            </div>
+            <div className="tablo-container">
+              <table>
+                <thead>
+                  <tr><th>Mülk</th><th>Kiracı</th><th>TC No</th><th>Dönem</th><th>Tutar</th><th>Fatura No</th><th>Fatura Tarihi</th><th>Durum</th></tr>
+                </thead>
+                <tbody>
+                  {faturaKesilenOdemeler.length === 0 ? (
+                    <tr><td colSpan={8} style={{ textAlign:'center', padding:'40px', color:'#64748B' }}>
+                      Henüz kesilmiş fatura yok.
+                    </td></tr>
+                  ) : faturaKesilenOdemeler.map(o => {
+                    const m = mulkler.find(x => x.id === o.mulkId);
+                    const dt = new Date(o.vadeTarihi);
+                    return (
+                      <tr key={o.id} style={{ background:'linear-gradient(90deg,#F0FFF4,white)' }}>
+                        <td><div style={{ fontWeight:'700' }}>{TIP_IKONLARI[m?.tip]} {m?.ad}</div></td>
+                        <td><div style={{ fontWeight:'600' }}>{m?.kiraci || '—'}</div></td>
+                        <td><div style={{ fontSize:'12px', color:'#64748B' }}>{m?.kiraci_tc || '—'}</div></td>
+                        <td>{AY_ADLARI[dt.getMonth()]} {dt.getFullYear()}</td>
+                        <td style={{ fontWeight:'800', color:'#059669' }}>₺{o.tutar.toLocaleString('tr-TR')}</td>
+                        <td><span style={{ fontSize:'12px', fontWeight:'700', color:'#14532D' }}>{o.faturaNo || '—'}</span></td>
+                        <td style={{ fontSize:'12px' }}>{o.faturaTarihi ? `📅 ${o.faturaTarihi}` : '—'}</td>
+                        <td><span style={{ background:'#DCFCE7', color:'#14532D', padding:'4px 10px', borderRadius:'12px', fontSize:'12px', fontWeight:'700' }}>🧾 Kesildi</span></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ═══ MÜLK DETAY MODAL ═══ */}
       <Modal acik={!!detayMulk} kapat={() => setDetayMulk(null)}
         baslik={`${TIP_IKONLARI[detayMulk?.tip]||'🏠'} ${detayMulk?.ad}`} genislik="820px">
@@ -875,7 +1257,8 @@ export default function KiraPage() {
                 <div style={{ flex:1 }}>
                   <div style={{ fontSize:'20px', fontWeight:'800', color:'white' }}>{gm.ad}</div>
                   <div style={{ fontSize:'13px', color:'#94A3B8', marginTop:'3px' }}>📍 {gm.adres}</div>
-                  {gm.kiraci && <div style={{ fontSize:'13px', color:'#93C5FD', marginTop:'5px' }}>👤 {gm.kiraci}{gm.kiraci_telefon && ` — ${gm.kiraci_telefon}`}</div>}
+                  {gm.kiraci && <div style={{ fontSize:'13px', color:'#93C5FD', marginTop:'5px' }}>👤 {gm.kiraci}{gm.kiraci_telefon && ` — ${gm.kiraci_telefon}`}{gm.kiraci_tc && ` | TC: ${gm.kiraci_tc}`}</div>}
+                  {gm.faturaKes && <div style={{ fontSize:'12px', color:'#6EE7B7', marginTop:'4px' }}>🧾 Fatura kesilecek</div>}
                 </div>
                 <div style={{ textAlign:'right' }}>
                   <div style={{ fontSize:'28px', fontWeight:'800', color:'#6EE7B7' }}>
@@ -892,7 +1275,12 @@ export default function KiraPage() {
               </div>
 
               <div className="tab-bar" style={{ marginBottom:'16px' }}>
-                {[{id:'ozet',label:'📋 Özet'},{id:'odemeler',label:'💳 Ay Ay Ödemeler'},{id:'sozlesme',label:'📄 Sözleşme & Yenileme'}].map(t => (
+                {[
+                  {id:'ozet',label:'📋 Özet'},
+                  {id:'odemeler',label:'💳 Ay Ay Ödemeler'},
+                  {id:'sozlesme',label:'📄 Sözleşme & Yenileme'},
+                  {id:'fatura_detay',label:'🧾 Faturalar'},
+                ].map(t => (
                   <div key={t.id} className={`tab-item ${detaySekme===t.id?'aktif':''}`} onClick={()=>setDetaySekme(t.id)}>{t.label}</div>
                 ))}
               </div>
@@ -903,12 +1291,14 @@ export default function KiraPage() {
                     <InfoSatir etiket="Mülk Tipi" deger={gm.tip?.toUpperCase()} />
                     <InfoSatir etiket="Kiracı" deger={gm.kiraci} />
                     <InfoSatir etiket="Kiracı Telefon" deger={gm.kiraci_telefon} />
+                    <InfoSatir etiket="Kiracı TC No" deger={gm.kiraci_tc || '—'} />
                     <InfoSatir etiket="Aylık Kira" deger={`₺${gm.aylikKira.toLocaleString('tr-TR')}`} renk="#059669" />
                     <InfoSatir etiket="Depozito" deger={`₺${gm.depozito.toLocaleString('tr-TR')}`} />
                     <InfoSatir etiket="E-posta" deger={gm.kiraci_email} />
                     <InfoSatir etiket="Sözleşme Başlangıç" deger={gm.sozlesmeBaslangic} />
                     <InfoSatir etiket="Sözleşme Bitiş" deger={gm.sozlesmeBitis} />
                     <InfoSatir etiket="Oto. Yenileme" deger={gm.yenilemeAktif ? `✅ Aktif — %${gm.yenilemeOrani} artış` : '❌ Pasif'} renk={gm.yenilemeAktif?'#7C3AED':'#64748B'} />
+                    <InfoSatir etiket="Fatura Kesilecek" deger={gm.faturaKes ? '✅ Evet' : '❌ Hayır'} renk={gm.faturaKes?'#059669':'#64748B'} />
                   </div>
                   <div style={{ display:'flex', gap:'8px' }}>
                     <button className="btn btn-primary" style={{ flex:1 }} onClick={() => { setDetayMulk(null); acDuzenle(gm); }}>✏️ Düzenle</button>
@@ -920,7 +1310,12 @@ export default function KiraPage() {
               )}
 
               {detaySekme === 'odemeler' && (
-                <AyAyOdemeler mulk={gm} odemeler={odemeler} onOde={odeIsaretle} />
+                <AyAyOdemeler
+                  mulk={gm}
+                  odemeler={odemeler}
+                  onOde={(o) => { setSeciliOdeme(o); setOdemeOnayModal(true); }}
+                  onFaturaModal={(o) => { setFaturaOdeme(o); setFaturaModalAcik(true); }}
+                />
               )}
 
               {detaySekme === 'sozlesme' && (
@@ -929,6 +1324,59 @@ export default function KiraPage() {
                   setDetayMulk(m => ({ ...m, aylikKira: yeniKira, yenilemeOrani: oran }));
                 }} />
               )}
+
+              {detaySekme === 'fatura_detay' && (() => {
+                const mulkFaturaOdemeleri = odemeler.filter(o => o.mulkId === gm.id);
+                const kesilmis = mulkFaturaOdemeleri.filter(o => o.faturaKesildi);
+                const bekleyen = mulkFaturaOdemeleri.filter(o => o.durum === 'odendi' && !o.faturaKesildi && gm.faturaKes);
+                return (
+                  <div>
+                    {!gm.faturaKes && (
+                      <div style={{ background:'#FEF9C3', borderRadius:'10px', padding:'16px', marginBottom:'16px', border:'1px solid #FDE68A', textAlign:'center' }}>
+                        <div style={{ fontWeight:'700', color:'#92400E' }}>Bu mülk için fatura kesilecek özelliği aktif değil.</div>
+                        <div style={{ fontSize:'13px', color:'#78350F', marginTop:'4px' }}>Düzenle butonundan "Fatura Kesilecek" seçeneğini aktif edebilirsiniz.</div>
+                      </div>
+                    )}
+                    {bekleyen.length > 0 && (
+                      <div style={{ marginBottom:'16px' }}>
+                        <div style={{ fontWeight:'700', fontSize:'14px', color:'#92400E', marginBottom:'8px' }}>🧾 Fatura Bekleyenler</div>
+                        {bekleyen.map(o => {
+                          const dt = new Date(o.vadeTarihi);
+                          return (
+                            <div key={o.id} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', background:'#FFFBF0', border:'1px solid #FDE68A', borderRadius:'8px', padding:'12px 16px', marginBottom:'8px' }}>
+                              <div>
+                                <div style={{ fontWeight:'700', fontSize:'13px' }}>{AY_ADLARI[dt.getMonth()]} {dt.getFullYear()}</div>
+                                <div style={{ fontSize:'12px', color:'#64748B' }}>₺{o.tutar.toLocaleString('tr-TR')}</div>
+                              </div>
+                              <button onClick={() => { setFaturaOdeme(o); setFaturaModalAcik(true); }}
+                                style={{ background:'linear-gradient(135deg,#059669,#047857)', color:'white', border:'none',
+                                  borderRadius:'8px', padding:'8px 16px', fontSize:'13px', fontWeight:'700', cursor:'pointer' }}>
+                                🧾 Fatura Kes
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <div style={{ fontWeight:'700', fontSize:'14px', color:'#14532D', marginBottom:'8px' }}>✅ Kesilen Faturalar ({kesilmis.length})</div>
+                    {kesilmis.length === 0 ? (
+                      <div style={{ textAlign:'center', padding:'24px', color:'#64748B', background:'#F8FAFC', borderRadius:'8px' }}>Henüz kesilmiş fatura yok.</div>
+                    ) : kesilmis.map(o => {
+                      const dt = new Date(o.vadeTarihi);
+                      return (
+                        <div key={o.id} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', background:'#F0FFF4', border:'1px solid #86EFAC', borderRadius:'8px', padding:'12px 16px', marginBottom:'8px' }}>
+                          <div>
+                            <div style={{ fontWeight:'700', fontSize:'13px' }}>{AY_ADLARI[dt.getMonth()]} {dt.getFullYear()}</div>
+                            <div style={{ fontSize:'12px', color:'#14532D' }}>₺{o.tutar.toLocaleString('tr-TR')} {o.faturaNo && `| ${o.faturaNo}`}</div>
+                            {o.faturaTarihi && <div style={{ fontSize:'11px', color:'#64748B' }}>Fatura Tarihi: {o.faturaTarihi}</div>}
+                          </div>
+                          <span style={{ background:'#DCFCE7', color:'#14532D', padding:'5px 12px', borderRadius:'12px', fontSize:'12px', fontWeight:'700' }}>🧾 Kesildi</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </>
           );
         })()}
@@ -943,13 +1391,32 @@ export default function KiraPage() {
           <Inp label="Mülk Tipi" name="tip" options={TIPLER.map(t=>({ value:t, label:`${TIP_IKONLARI[t]||'🏠'} ${t.charAt(0).toUpperCase()+t.slice(1)}` }))} />
           <Inp label="Durum" name="durum" options={[{value:'aktif',label:'✅ Kiralık'},{value:'bos',label:'🔑 Boş'}]} />
           <Inp label="Kiracı Adı" name="kiraci" />
+          <Inp label="Kiracı TC No (opsiyonel)" name="kiraci_tc" />
           <Inp label="Kiracı Telefon" name="kiraci_telefon" />
           <Inp label="Kiracı E-posta" name="kiraci_email" tip="email" />
-          <div />
           <Inp label="Aylık Kira (₺)" name="aylikKira" tip="number" />
           <Inp label="Depozito (₺)" name="depozito" tip="number" />
           <Inp label="Sözleşme Başlangıç" name="sozlesmeBaslangic" tip="date" />
           <Inp label="Sözleşme Bitiş" name="sozlesmeBitis" tip="date" />
+
+          {/* Fatura Kesilecek */}
+          <div style={{ gridColumn:'1/-1', background:'linear-gradient(135deg,#F0FDF4,#DCFCE7)', border:'2px solid #86EFAC', borderRadius:'12px', padding:'14px 16px' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
+              <input type="checkbox" id="faturaChk" checked={Boolean(form.faturaKes)}
+                onChange={e => setForm(p=>({...p,faturaKes:e.target.checked}))}
+                style={{ width:'18px', height:'18px', accentColor:'#059669', cursor:'pointer' }} />
+              <label htmlFor="faturaChk" style={{ fontWeight:'800', fontSize:'15px', color:'#14532D', cursor:'pointer' }}>
+                🧾 Fatura Kesilecek
+              </label>
+            </div>
+            {form.faturaKes && (
+              <div style={{ fontSize:'13px', color:'#15803D', marginTop:'8px', paddingLeft:'28px' }}>
+                ✅ Bu mülk için ödeme alındığında otomatik olarak fatura kesilecekler listesine düşer.
+              </div>
+            )}
+          </div>
+
+          {/* Otomatik Yenileme */}
           <div style={{ gridColumn:'1/-1', background:'linear-gradient(135deg,#F5F3FF,#EDE9FE)', border:'2px solid #C4B5FD', borderRadius:'12px', padding:'16px' }}>
             <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'10px' }}>
               <input type="checkbox" id="yenilemeChk" checked={Boolean(form.yenilemeAktif)}
@@ -1019,6 +1486,24 @@ export default function KiraPage() {
           </>
         )}
       </Modal>
+
+      {/* ═══ Kısmi/Onay Ödeme Modal ═══ */}
+      <OdemeOnayModal
+        acik={odemeOnayModal}
+        odeme={seciliOdeme}
+        mulk={seciliOdeme ? mulkler.find(m => m.id === seciliOdeme.mulkId) : null}
+        kapat={() => { setOdemeOnayModal(false); setSeciliOdeme(null); }}
+        onOde={odeIsaretle}
+      />
+
+      {/* ═══ Fatura Modal ═══ */}
+      <FaturaModal
+        acik={faturaModalAcik}
+        odeme={faturaOdeme}
+        mulk={faturaOdeme ? mulkler.find(m => m.id === faturaOdeme.mulkId) : null}
+        kapat={() => { setFaturaModalAcik(false); setFaturaOdeme(null); }}
+        onFaturaKes={faturaKes}
+      />
     </div>
   );
 }
