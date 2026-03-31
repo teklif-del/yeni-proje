@@ -649,16 +649,26 @@ export default function KiraPage() {
   const [faturaModalAcik, setFaturaModalAcik] = useState(false);
   const [faturaOdeme, setFaturaOdeme]         = useState(null);
 
+  // Gider state
+  const [giderler, setGiderler]         = useState([]);
+  const [giderModal, setGiderModal]     = useState(false);
+  const [giderDuzenle, setGiderDuzenle] = useState(null);
+  const [giderForm, setGiderForm]       = useState({
+    mulkId:'', tarih: new Date().toISOString().split('T')[0], tutar:'', kategori:'Bakım/Onarım', aciklama:'',
+  });
+
   // ─── Veri Yükle ──────────────────────────────────────────
   useEffect(() => {
     async function yukle() {
       setYukleniyor(true);
-      const [{ data: md }, { data: od }] = await Promise.all([
+      const [{ data: md }, { data: od }, { data: gd }] = await Promise.all([
         supabase.from('kira_mulkleri').select('*').order('id'),
         supabase.from('kira_odemeleri').select('*').order('vade_tarihi', { ascending: false }),
+        supabase.from('kira_giderler').select('*').order('tarih', { ascending: false }),
       ]);
       setMulkler((md || []).map(dbToMulk));
       setOdemeler((od || []).map(dbToOdeme));
+      setGiderler(gd || []);
 
       setYukleniyor(false);
     }
@@ -683,6 +693,10 @@ export default function KiraPage() {
       (m.kiraci||'').toLowerCase().includes(aramaMetni.toLowerCase()) ||
       (m.adres||'').toLowerCase().includes(aramaMetni.toLowerCase())
     ), [mulkler, aramaMetni]);
+
+  const toplamOdenenKira = useMemo(() => odemeler.filter(o=>o.durum==='odendi').reduce((s,o)=>s+o.odenenTutar,0), [odemeler]);
+  const toplamGiderler   = useMemo(() => giderler.reduce((s,g)=>s+Number(g.tutar),0), [giderler]);
+  const netGelir         = toplamOdenenKira - toplamGiderler;
 
   // Fatura kesilecek ödemeler (ödendi + mülkün fatura_kes aktif + henüz fatura kesilmemiş)
   const faturaKesilenOdemeler = useMemo(() =>
@@ -788,6 +802,37 @@ export default function KiraPage() {
       }
       alert(`✅ Sözleşme ${suereYil} yıl yenilendi! Yeni kira: ₺${yeniKira.toLocaleString('tr-TR')}`);
     }
+  };
+
+  // ─── Gider CRUD ──────────────────────────────────────────
+  const GIDER_KATEGORILER = ['Bakım/Onarım','Vergi/Harç','Sigorta','Yönetim Komisyonu','Aidat','Temizlik','Elektrik/Su/Doğalgaz','Diğer'];
+  const BOS_GIDER = { mulkId:'', tarih: new Date().toISOString().split('T')[0], tutar:'', kategori:'Bakım/Onarım', aciklama:'' };
+
+  const giderKaydet = async () => {
+    if (!giderForm.tutar) { alert('Tutar zorunludur!'); return; }
+    const row = {
+      mulk_id:  giderForm.mulkId ? parseInt(giderForm.mulkId) : null,
+      tarih:    giderForm.tarih,
+      tutar:    parseFloat(giderForm.tutar) || 0,
+      kategori: giderForm.kategori || 'Diğer',
+      aciklama: giderForm.aciklama || '',
+    };
+    if (giderDuzenle) {
+      const { error } = await supabase.from('kira_giderler').update(row).eq('id', giderDuzenle.id);
+      if (!error) setGiderler(prev => prev.map(g => g.id === giderDuzenle.id ? { ...g, ...row, id: giderDuzenle.id } : g));
+      setGiderDuzenle(null);
+    } else {
+      const { data, error } = await supabase.from('kira_giderler').insert(row).select().single();
+      if (!error && data) setGiderler(prev => [data, ...prev]);
+      else if (error) { alert('Gider eklenemedi: ' + error.message); return; }
+    }
+    setGiderModal(false);
+    setGiderForm(BOS_GIDER);
+  };
+
+  const giderSil = async (id) => {
+    const { error } = await supabase.from('kira_giderler').delete().eq('id', id);
+    if (!error) setGiderler(prev => prev.filter(g => g.id !== id));
   };
 
   // ─── Mülk kaydet ─────────────────────────────────────────
@@ -935,6 +980,8 @@ export default function KiraPage() {
           { ikon:'📄', label:'Kesilen Fatura (Matrah)',  deger: toplamFaturaTutar>0 ? `₺${toplamFaturaTutar.toLocaleString('tr-TR')}` : '₺0',         bg:'#DCFCE7', renk:'#059669' },
           { ikon:'🔢', label:'Toplam KDV',               deger: toplamKdvTutar>0   ? `₺${toplamKdvTutar.toLocaleString('tr-TR')}` : '₺0',            bg:'#EFF6FF', renk:'#2563EB' },
           { ikon:'💎', label:'Fatura KDV Dahil',         deger: toplamKdvDahilTutar>0 ? `₺${toplamKdvDahilTutar.toLocaleString('tr-TR')}` : '₺0',    bg:'#EDE9FE', renk:'#4F46E5' },
+          { ikon:'📉', label:'Toplam Gider',             deger:`₺${toplamGiderler.toLocaleString('tr-TR')}`,                                           bg:'#FEE2E2', renk:'#DC2626' },
+          { ikon:'💵', label:'Net Gelir',                deger:`₺${netGelir.toLocaleString('tr-TR')}`,                                                 bg: netGelir>=0?'#DCFCE7':'#FEE2E2', renk: netGelir>=0?'#15803D':'#DC2626' },
         ].map(k => (
           <div key={k.label} className="ozet-kart">
             <div className="kart-ikon" style={{ background:k.bg, fontSize:'20px' }}>{k.ikon}</div>
@@ -1014,6 +1061,7 @@ export default function KiraPage() {
             </span>
           )}
         </div>
+        <div className={`tab-item ${aktifTab==='giderler'?'aktif':''}`} onClick={()=>setAktifTab('giderler')}>📉 Giderler</div>
       </div>
 
       {/* ═══ MÜLKLER ═══ */}
@@ -1345,6 +1393,81 @@ export default function KiraPage() {
       )}
 
 
+      {/* ═══ GİDERLER ═══ */}
+      {aktifTab === 'giderler' && (
+        <div>
+          <div className="filtre-bar">
+            <div style={{ fontSize:'14px', color:'#64748B' }}>
+              Toplam: <b style={{ color:'#DC2626' }}>₺{toplamGiderler.toLocaleString('tr-TR')}</b>
+              &nbsp;·&nbsp; Net Gelir: <b style={{ color: netGelir>=0?'#15803D':'#DC2626' }}>₺{netGelir.toLocaleString('tr-TR')}</b>
+            </div>
+            <button className="btn btn-primary" onClick={() => { setGiderForm(BOS_GIDER); setGiderDuzenle(null); setGiderModal(true); }}>+ Gider Ekle</button>
+          </div>
+
+          <div className="panel">
+            <div className="panel-baslik">
+              <h3>📉 Kira Giderleri</h3>
+              <span style={{ background:'#FEE2E2', color:'#DC2626', padding:'5px 14px', borderRadius:'12px', fontSize:'13px', fontWeight:'700' }}>
+                {giderler.length} kayıt
+              </span>
+            </div>
+            <div className="tablo-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Tarih</th><th>Mülk</th><th>Kategori</th><th>Tutar</th><th>Açıklama</th><th>İşlem</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {giderler.map((g, idx) => {
+                    const m = mulkler.find(x => x.id === g.mulk_id);
+                    return (
+                      <tr key={g.id} style={{ background: idx%2===0?'white':'#FAFBFF' }}>
+                        <td style={{ fontSize:'13px', fontWeight:'600' }}>📅 {g.tarih}</td>
+                        <td>
+                          {m
+                            ? <span style={{ fontWeight:'600' }}>{TIP_IKONLARI[m.tip]} {m.ad}</span>
+                            : <span style={{ color:'#94A3B8', fontStyle:'italic' }}>🌐 Genel</span>}
+                        </td>
+                        <td>
+                          <span style={{ background:'#FEE2E2', color:'#991B1B', padding:'3px 10px', borderRadius:'12px', fontSize:'12px', fontWeight:'700' }}>
+                            {g.kategori}
+                          </span>
+                        </td>
+                        <td style={{ fontWeight:'800', fontSize:'15px', color:'#DC2626' }}>
+                          ₺{Number(g.tutar).toLocaleString('tr-TR')}
+                        </td>
+                        <td style={{ fontSize:'13px', color:'#64748B' }}>{g.aciklama || '—'}</td>
+                        <td>
+                          <div style={{ display:'flex', gap:'4px' }}>
+                            <button className="btn btn-secondary btn-sm" title="Düzenle"
+                              onClick={() => {
+                                setGiderForm({ mulkId: g.mulk_id||'', tarih: g.tarih, tutar: String(g.tutar), kategori: g.kategori, aciklama: g.aciklama||'' });
+                                setGiderDuzenle(g);
+                                setGiderModal(true);
+                              }}>✏️</button>
+                            <button className="btn btn-danger btn-sm" title="Sil"
+                              onClick={() => { if (window.confirm('Bu gider silinsin mi?')) giderSil(g.id); }}>🗑️</button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {giderler.length === 0 && (
+                    <tr><td colSpan={6} style={{ textAlign:'center', padding:'50px', color:'#64748B' }}>
+                      <div style={{ fontSize:'36px', marginBottom:'10px' }}>📉</div>
+                      <div style={{ fontWeight:'600' }}>Henüz gider kaydı yok.</div>
+                      <div style={{ fontSize:'13px', marginTop:'6px' }}>Bakım, vergi, sigorta gibi mülk giderlerini buraya ekleyebilirsiniz.</div>
+                    </td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+
       {/* ═══ MÜLK DETAY MODAL ═══ */}
       <Modal acik={!!detayMulk} kapat={() => setDetayMulk(null)}
         baslik={`${TIP_IKONLARI[detayMulk?.tip]||'🏠'} ${detayMulk?.ad}`} genislik="820px">
@@ -1626,6 +1749,35 @@ export default function KiraPage() {
         kapat={() => { setFaturaModalAcik(false); setFaturaOdeme(null); }}
         onFaturaKes={faturaKes}
       />
+
+      {/* ═══ Gider Ekle / Düzenle Modal ═══ */}
+      <Modal acik={giderModal} kapat={() => { setGiderModal(false); setGiderDuzenle(null); setGiderForm(BOS_GIDER); }}
+        baslik={giderDuzenle ? '✏️ Gider Düzenle' : '📉 Kira Gideri Ekle'} genislik="480px">
+        <div style={{ display:'flex', flexDirection:'column', gap:'12px' }}>
+          <div style={{ display:'flex', flexDirection:'column', gap:'5px' }}>
+            <label style={{ fontSize:'12px', fontWeight:'600', color:'#374151' }}>Mülk (opsiyonel — boş bırakırsanız genel gider)</label>
+            <select style={{ padding:'9px 12px', border:'1.5px solid #E2E8F0', borderRadius:'8px', fontSize:'14px', outline:'none', background:'white' }}
+              value={giderForm.mulkId} onChange={e => setGiderForm(p=>({...p,mulkId:e.target.value}))}>
+              <option value="">🌐 Genel Gider (Mülke bağlı değil)</option>
+              {mulkler.map(m => <option key={m.id} value={m.id}>{TIP_IKONLARI[m.tip]} {m.ad}</option>)}
+            </select>
+          </div>
+          <Inp label="Tarih" name="tarih" tip="date" form={giderForm} setForm={setGiderForm} />
+          <Inp label="Tutar (₺)" name="tutar" tip="number" zorunlu form={giderForm} setForm={setGiderForm} />
+          <div style={{ display:'flex', flexDirection:'column', gap:'5px' }}>
+            <label style={{ fontSize:'12px', fontWeight:'600', color:'#374151' }}>Kategori</label>
+            <select style={{ padding:'9px 12px', border:'1.5px solid #E2E8F0', borderRadius:'8px', fontSize:'14px', outline:'none', background:'white' }}
+              value={giderForm.kategori} onChange={e => setGiderForm(p=>({...p,kategori:e.target.value}))}>
+              {GIDER_KATEGORILER.map(k => <option key={k} value={k}>{k}</option>)}
+            </select>
+          </div>
+          <Inp label="Açıklama" name="aciklama" form={giderForm} setForm={setGiderForm} />
+        </div>
+        <div style={{ display:'flex', gap:'8px', marginTop:'16px', justifyContent:'flex-end' }}>
+          <button className="btn btn-secondary" onClick={() => { setGiderModal(false); setGiderDuzenle(null); setGiderForm(BOS_GIDER); }}>İptal</button>
+          <button className="btn btn-primary" onClick={giderKaydet}>{giderDuzenle ? '💾 Güncelle' : '✅ Kaydet'}</button>
+        </div>
+      </Modal>
 
     </div>
   );
